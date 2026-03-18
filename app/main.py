@@ -1,6 +1,7 @@
+import json
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
 
@@ -25,11 +26,26 @@ def health():
 
 @app.post("/analyze")
 def analyze(request: EmailRequest):
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
     prompt = f"""
 You are an AI office assistant.
-Analyze the following email text and return:
-1. A short summary
-2. A list of tasks with title, deadline, and priority
+
+Analyze the email below and return ONLY valid JSON.
+Do not include markdown, code fences, or extra text.
+
+Required JSON format:
+{{
+  "summary": "short summary",
+  "tasks": [
+    {{
+      "title": "task title",
+      "deadline": "deadline or Not specified",
+      "priority": "low, medium, or high"
+    }}
+  ]
+}}
 
 Email:
 {request.text}
@@ -40,7 +56,18 @@ Email:
         input=prompt
     )
 
+    output_text = response.output_text.strip()
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=500,
+            detail="AI response was not valid JSON"
+        )
+
     return {
         "original_text": request.text,
-        "ai_response": response.output_text
+        "summary": parsed.get("summary", ""),
+        "tasks": parsed.get("tasks", [])
     }
