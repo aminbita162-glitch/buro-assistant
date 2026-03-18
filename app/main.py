@@ -1,6 +1,11 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 app = FastAPI()
+
+
+class EmailRequest(BaseModel):
+    text: str
 
 
 @app.get("/")
@@ -14,14 +19,17 @@ def health():
 
 
 @app.post("/analyze")
-def analyze():
+def analyze(request: EmailRequest):
+    text = request.text
+
     return {
-        "summary": "This is a sample summary",
+        "original_text": text,
+        "summary": "This is a demo summary",
         "tasks": [
             {
-                "title": "Sample task",
-                "deadline": "Not specified",
-                "priority": "medium"
+                "title": "Follow up email",
+                "deadline": "Tomorrow",
+                "priority": "high"
             }
         ]
     }
