@@ -45,6 +45,26 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/tasks")
+def get_tasks():
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+    result = []
+
+    for task in tasks:
+        result.append(
+            {
+                "id": task.id,
+                "title": task.title,
+                "deadline": task.deadline,
+                "priority": task.priority,
+            }
+        )
+
+    db.close()
+    return {"tasks": result}
+
+
 @app.post("/analyze")
 def analyze(request: EmailRequest):
     if not request.text.strip():
