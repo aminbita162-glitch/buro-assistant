@@ -129,9 +129,14 @@ def update_task(task_id: int, request: UpdateTaskRequest):
     task.priority = request.priority
 
     db.commit()
+    db.refresh(task)
+    result = serialize_task(task)
     db.close()
 
-    return {"message": "Task updated successfully"}
+    return {
+        "message": "Task updated successfully",
+        "task": result
+    }
 
 
 @app.post("/tasks/{task_id}/ai-update")
@@ -278,7 +283,7 @@ def assistant(request: AssistantRequest):
     prompt = f"""
 You are an AI office assistant.
 
-Your job is to detect the user's intent and return ONLY valid JSON.
+Your job is to detect one or more user intents and return ONLY valid JSON.
 Do not include markdown, code fences, or extra text.
 
 Available actions:
@@ -294,25 +299,31 @@ User instruction:
 {request.text}
 
 Rules:
-- Choose create only when the user wants a brand new task.
-- Choose update only when the user clearly refers to an existing task and wants it changed.
-- Choose delete only when the user clearly refers to an existing task and wants it removed.
-- Choose clarify when the instruction is ambiguous, unclear, or there is not enough information.
+- Break the user's instruction into one or more actions when needed.
+- Use clarify if the instruction is ambiguous, unclear, or missing enough information.
+- Use create only when the user wants a brand new task.
+- Use update only when the user clearly refers to an existing task and wants it changed.
+- Use delete only when the user clearly refers to an existing task and wants it removed.
 - For create, set task_id to null and return title, deadline, and priority.
 - For update, return the correct task_id and the updated title, deadline, and priority.
 - For delete, return the correct task_id. Title, deadline, and priority can be empty strings.
 - For clarify, set task_id to null and return a short question in clarify_message.
-- Match against the current task list carefully. Prefer the best matching task title when the user refers to an existing task.
+- Match against the current task list carefully.
 - priority must be one of: low, medium, high
+- If there is only one action, still return it inside the actions array.
 
 Required JSON format:
 {{
-  "action": "create or update or delete or clarify",
-  "task_id": 123,
-  "title": "task title or empty string",
-  "deadline": "deadline or Not specified or empty string",
-  "priority": "low or medium or high or empty string",
-  "clarify_message": "question or empty string"
+  "actions": [
+    {{
+      "action": "create or update or delete or clarify",
+      "task_id": 123,
+      "title": "task title or empty string",
+      "deadline": "deadline or Not specified or empty string",
+      "priority": "low or medium or high or empty string",
+      "clarify_message": "question or empty string"
+    }}
+  ]
 }}
 """
 
@@ -332,78 +343,101 @@ Required JSON format:
             detail="AI response was not valid JSON"
         )
 
-    action = parsed.get("action")
+    actions = parsed.get("actions", [])
 
-    if action == "clarify":
+    if not actions:
         db.close()
-        return {
-            "action": "clarify",
-            "message": parsed.get("clarify_message", "Please clarify your request.")
-        }
+        raise HTTPException(status_code=400, detail="No actions returned by AI")
 
-    if action == "create":
-        db_task = Task(
-            title=parsed.get("title", ""),
-            deadline=parsed.get("deadline", "Not specified"),
-            priority=parsed.get("priority", "medium")
-        )
-        db.add(db_task)
-        db.commit()
-        db.refresh(db_task)
-
-        result = {
-            "action": "create",
-            "message": "Task created successfully",
-            "task": serialize_task(db_task)
-        }
-        db.close()
-        return result
-
-    if action == "update":
-        task_id = parsed.get("task_id")
-        task = db.query(Task).filter(Task.id == task_id).first()
-
-        if not task:
+    for item in actions:
+        if item.get("action") == "clarify":
             db.close()
-            raise HTTPException(status_code=404, detail="Task not found")
+            return {
+                "action": "clarify",
+                "message": item.get("clarify_message", "Please clarify your request."),
+                "actions": actions
+            }
 
-        task.title = parsed.get("title", task.title)
-        task.deadline = parsed.get("deadline", task.deadline)
-        task.priority = parsed.get("priority", task.priority)
+    results = []
 
-        db.commit()
-        db.refresh(task)
+    for item in actions:
+        action = item.get("action")
 
-        result = {
-            "action": "update",
-            "message": "Task updated successfully",
-            "task": serialize_task(task)
-        }
-        db.close()
-        return result
+        if action == "create":
+            db_task = Task(
+                title=item.get("title", ""),
+                deadline=item.get("deadline", "Not specified"),
+                priority=item.get("priority", "medium")
+            )
+            db.add(db_task)
+            db.commit()
+            db.refresh(db_task)
 
-    if action == "delete":
-        task_id = parsed.get("task_id")
-        task = db.query(Task).filter(Task.id == task_id).first()
+            results.append(
+                {
+                    "action": "create",
+                    "message": "Task created successfully",
+                    "task": serialize_task(db_task)
+                }
+            )
 
-        if not task:
+        elif action == "update":
+            task_id = item.get("task_id")
+            task = db.query(Task).filter(Task.id == task_id).first()
+
+            if not task:
+                db.close()
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            task.title = item.get("title", task.title)
+            task.deadline = item.get("deadline", task.deadline)
+            task.priority = item.get("priority", task.priority)
+
+            db.commit()
+            db.refresh(task)
+
+            results.append(
+                {
+                    "action": "update",
+                    "message": "Task updated successfully",
+                    "task": serialize_task(task)
+                }
+            )
+
+        elif action == "delete":
+            task_id = item.get("task_id")
+            task = db.query(Task).filter(Task.id == task_id).first()
+
+            if not task:
+                db.close()
+                raise HTTPException(status_code=404, detail="Task not found")
+
+            deleted_task = serialize_task(task)
+
+            db.delete(task)
+            db.commit()
+
+            results.append(
+                {
+                    "action": "delete",
+                    "message": "Task deleted successfully",
+                    "task": deleted_task
+                }
+            )
+
+        else:
             db.close()
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        deleted_task = serialize_task(task)
-
-        db.delete(task)
-        db.commit()
-        db.close()
-
-        return {
-            "action": "delete",
-            "message": "Task deleted successfully",
-            "task": deleted_task
-        }
+            raise HTTPException(status_code=400, detail="Invalid action returned by AI")
 
     db.close()
-    raise HTTPException(status_code=400, detail="Invalid action returned by AI")
+
+    if len(results) == 1:
+        return results[0]
+
+    return {
+        "message": "Multiple actions completed successfully",
+        "results": results
+    }
 
 
 @app.post("/analyze")
