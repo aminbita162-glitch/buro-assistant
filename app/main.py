@@ -1,11 +1,11 @@
 import json
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from openai import OpenAI
 
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, or_
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 app = FastAPI()
@@ -72,10 +72,77 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/stats")
+def get_stats():
+    db = SessionLocal()
+    tasks = db.query(Task).order_by(Task.id.desc()).all()
+
+    total = len(tasks)
+    high_count = 0
+    medium_count = 0
+    low_count = 0
+
+    for task in tasks:
+        priority = (task.priority or "").lower()
+
+        if priority == "high":
+            high_count += 1
+        elif priority == "medium":
+            medium_count += 1
+        elif priority == "low":
+            low_count += 1
+
+    recent_tasks = [serialize_task(task) for task in tasks[:5]]
+
+    db.close()
+
+    return {
+        "total_tasks": total,
+        "high_priority_tasks": high_count,
+        "medium_priority_tasks": medium_count,
+        "low_priority_tasks": low_count,
+        "recent_tasks": recent_tasks
+    }
+
+
 @app.get("/tasks")
 def get_tasks():
     db = SessionLocal()
     tasks = db.query(Task).order_by(Task.id.desc()).all()
+    result = [serialize_task(task) for task in tasks]
+    db.close()
+
+    return {
+        "count": len(result),
+        "tasks": result
+    }
+
+
+@app.get("/tasks/search")
+def search_tasks(
+    q: str = Query(default=""),
+    priority: str = Query(default=""),
+    deadline: str = Query(default="")
+):
+    db = SessionLocal()
+    query = db.query(Task)
+
+    if q.strip():
+        query = query.filter(
+            or_(
+                Task.title.ilike(f"%{q}%"),
+                Task.deadline.ilike(f"%{q}%"),
+                Task.priority.ilike(f"%{q}%")
+            )
+        )
+
+    if priority.strip():
+        query = query.filter(Task.priority.ilike(priority.strip()))
+
+    if deadline.strip():
+        query = query.filter(Task.deadline.ilike(f"%{deadline.strip()}%"))
+
+    tasks = query.order_by(Task.id.desc()).all()
     result = [serialize_task(task) for task in tasks]
     db.close()
 
@@ -225,6 +292,10 @@ Task list:
 User instruction:
 {request.text}
 
+Rules:
+- Choose exactly one best matching task_id.
+- Return only one task_id.
+
 Required JSON format:
 {{
   "task_id": 123
@@ -302,8 +373,10 @@ Rules:
 - Break the user's instruction into one or more actions when needed.
 - Use clarify if the instruction is ambiguous, unclear, or missing enough information.
 - Use create only when the user wants a brand new task.
-- Use update only when the user clearly refers to an existing task and wants it changed.
-- Use delete only when the user clearly refers to an existing task and wants it removed.
+- Use update only when the user clearly refers to one existing task and wants it changed.
+- Use delete only when the user clearly refers to one existing task and wants it removed.
+- For update and delete, choose exactly one best matching task_id.
+- Do not update multiple similar tasks at once.
 - For create, set task_id to null and return title, deadline, and priority.
 - For update, return the correct task_id and the updated title, deadline, and priority.
 - For delete, return the correct task_id. Title, deadline, and priority can be empty strings.
