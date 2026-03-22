@@ -35,6 +35,12 @@ class EmailRequest(BaseModel):
     text: str
 
 
+class UpdateTaskRequest(BaseModel):
+    title: str
+    deadline: str
+    priority: str
+
+
 @app.get("/")
 def root():
     return {"message": "Buro Assistant API is running 🚀"}
@@ -79,6 +85,25 @@ def delete_task(task_id: int):
     db.close()
 
     return {"message": "Task deleted successfully"}
+
+
+@app.put("/tasks/{task_id}")
+def update_task(task_id: int, request: UpdateTaskRequest):
+    db = SessionLocal()
+    task = db.query(Task).filter(Task.id == task_id).first()
+
+    if not task:
+        db.close()
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task.title = request.title
+    task.deadline = request.deadline
+    task.priority = request.priority
+
+    db.commit()
+    db.close()
+
+    return {"message": "Task updated successfully"}
 
 
 @app.post("/analyze")
