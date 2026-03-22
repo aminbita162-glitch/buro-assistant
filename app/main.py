@@ -65,6 +65,22 @@ def get_tasks():
     return {"tasks": result}
 
 
+@app.delete("/tasks/{task_id}")
+def delete_task(task_id: int):
+    db = SessionLocal()
+    task = db.query(Task).filter(Task.id == task_id).first()
+
+    if not task:
+        db.close()
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    db.delete(task)
+    db.commit()
+    db.close()
+
+    return {"message": "Task deleted successfully"}
+
+
 @app.post("/analyze")
 def analyze(request: EmailRequest):
     if not request.text.strip():
