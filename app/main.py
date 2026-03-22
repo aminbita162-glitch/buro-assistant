@@ -74,6 +74,26 @@ def get_tasks():
     }
 
 
+@app.get("/tasks/{task_id}")
+def get_task(task_id: int):
+    db = SessionLocal()
+    task = db.query(Task).filter(Task.id == task_id).first()
+
+    if not task:
+        db.close()
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    result = {
+        "id": task.id,
+        "title": task.title,
+        "deadline": task.deadline,
+        "priority": task.priority,
+    }
+
+    db.close()
+    return result
+
+
 @app.delete("/tasks/{task_id}")
 def delete_task(task_id: int):
     db = SessionLocal()
