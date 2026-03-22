@@ -54,7 +54,7 @@ def health():
 @app.get("/tasks")
 def get_tasks():
     db = SessionLocal()
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
+    tasks = db.query(Task).all()
     result = []
 
     for task in tasks:
@@ -68,7 +68,10 @@ def get_tasks():
         )
 
     db.close()
-    return {"tasks": result}
+    return {
+        "count": len(result),
+        "tasks": result
+    }
 
 
 @app.delete("/tasks/{task_id}")
@@ -149,6 +152,7 @@ Email:
         )
 
     db = SessionLocal()
+    saved_tasks = []
 
     for task in parsed.get("tasks", []):
         db_task = Task(
@@ -157,12 +161,22 @@ Email:
             priority=task.get("priority", "")
         )
         db.add(db_task)
+        db.commit()
+        db.refresh(db_task)
 
-    db.commit()
+        saved_tasks.append(
+            {
+                "id": db_task.id,
+                "title": db_task.title,
+                "deadline": db_task.deadline,
+                "priority": db_task.priority
+            }
+        )
+
     db.close()
 
     return {
         "original_text": request.text,
         "summary": parsed.get("summary", ""),
-        "tasks": parsed.get("tasks", [])
+        "created_tasks": saved_tasks
     }
