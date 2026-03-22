@@ -41,6 +41,10 @@ class UpdateTaskRequest(BaseModel):
     priority: str
 
 
+class UpdateTaskAIRequest(BaseModel):
+    text: str
+
+
 @app.get("/")
 def root():
     return {"message": "Buro Assistant API is running 🚀"}
@@ -127,6 +131,78 @@ def update_task(task_id: int, request: UpdateTaskRequest):
     db.close()
 
     return {"message": "Task updated successfully"}
+
+
+@app.post("/tasks/{task_id}/ai-update")
+def ai_update_task(task_id: int, request: UpdateTaskAIRequest):
+    db = SessionLocal()
+    task = db.query(Task).filter(Task.id == task_id).first()
+
+    if not task:
+        db.close()
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    prompt = f"""
+You are an AI office assistant.
+
+You will update an existing task based on the user's instruction.
+Return ONLY valid JSON.
+Do not include markdown, code fences, or extra text.
+
+Current task:
+{{
+  "id": {task.id},
+  "title": "{task.title}",
+  "deadline": "{task.deadline}",
+  "priority": "{task.priority}"
+}}
+
+User instruction:
+{request.text}
+
+Required JSON format:
+{{
+  "title": "updated task title",
+  "deadline": "updated deadline or Not specified",
+  "priority": "low, medium, or high"
+}}
+"""
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt
+    )
+
+    output_text = response.output_text.strip()
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        db.close()
+        raise HTTPException(
+            status_code=500,
+            detail="AI response was not valid JSON"
+        )
+
+    task.title = parsed.get("title", task.title)
+    task.deadline = parsed.get("deadline", task.deadline)
+    task.priority = parsed.get("priority", task.priority)
+
+    db.commit()
+    db.refresh(task)
+
+    result = {
+        "message": "Task updated successfully",
+        "task": {
+            "id": task.id,
+            "title": task.title,
+            "deadline": task.deadline,
+            "priority": task.priority,
+        }
+    }
+
+    db.close()
+    return result
 
 
 @app.post("/analyze")
