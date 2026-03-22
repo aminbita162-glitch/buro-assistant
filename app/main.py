@@ -54,7 +54,7 @@ def health():
 @app.get("/tasks")
 def get_tasks():
     db = SessionLocal()
-    tasks = db.query(Task).all()
+    tasks = db.query(Task).order_by(Task.id.desc()).all()
     result = []
 
     for task in tasks:
