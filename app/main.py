@@ -45,6 +45,10 @@ class UpdateTaskAIRequest(BaseModel):
     text: str
 
 
+class DeleteTaskAIRequest(BaseModel):
+    text: str
+
+
 @app.get("/")
 def root():
     return {"message": "Buro Assistant API is running 🚀"}
@@ -203,6 +207,90 @@ Required JSON format:
 
     db.close()
     return result
+
+
+@app.post("/tasks/ai-delete")
+def ai_delete_task(request: DeleteTaskAIRequest):
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+
+    if not tasks:
+        db.close()
+        raise HTTPException(status_code=404, detail="No tasks found")
+
+    task_list = []
+    for task in tasks:
+        task_list.append(
+            {
+                "id": task.id,
+                "title": task.title,
+                "deadline": task.deadline,
+                "priority": task.priority,
+            }
+        )
+
+    prompt = f"""
+You are an AI office assistant.
+
+The user wants to delete one task from the task list.
+Return ONLY valid JSON.
+Do not include markdown, code fences, or extra text.
+
+Task list:
+{json.dumps(task_list)}
+
+User instruction:
+{request.text}
+
+Required JSON format:
+{{
+  "task_id": 123
+}}
+"""
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt
+    )
+
+    output_text = response.output_text.strip()
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        db.close()
+        raise HTTPException(
+            status_code=500,
+            detail="AI response was not valid JSON"
+        )
+
+    task_id = parsed.get("task_id")
+
+    if not task_id:
+        db.close()
+        raise HTTPException(status_code=400, detail="Task id was not returned by AI")
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+
+    if not task:
+        db.close()
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    deleted_task = {
+        "id": task.id,
+        "title": task.title,
+        "deadline": task.deadline,
+        "priority": task.priority,
+    }
+
+    db.delete(task)
+    db.commit()
+    db.close()
+
+    return {
+        "message": "Task deleted successfully",
+        "deleted_task": deleted_task
+    }
 
 
 @app.post("/analyze")
