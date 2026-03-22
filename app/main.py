@@ -5,9 +5,30 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
 
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import sessionmaker, declarative_base
+
 app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String)
+    deadline = Column(String)
+    priority = Column(String)
+
+
+Base.metadata.create_all(bind=engine)
 
 
 class EmailRequest(BaseModel):
@@ -65,6 +86,19 @@ Email:
             status_code=500,
             detail="AI response was not valid JSON"
         )
+
+    db = SessionLocal()
+
+    for task in parsed.get("tasks", []):
+        db_task = Task(
+            title=task.get("title", ""),
+            deadline=task.get("deadline", ""),
+            priority=task.get("priority", "")
+        )
+        db.add(db_task)
+
+    db.commit()
+    db.close()
 
     return {
         "original_text": request.text,
