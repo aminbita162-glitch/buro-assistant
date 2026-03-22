@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Buro Assistant</title>
+</head>
+<body>
+
+  <h1>🧠 Buro Assistant</h1>
+
+  <input id="input" placeholder="Type your task..." />
+  <button onclick="send()">Send</button>
+
+  <h2>Response:</h2>
+  <pre id="output"></pre>
+
+  <script>
+    async function send() {
+      const text = document.getElementById("input").value;
+
+      const res = await fetch("https://buro-assistant.onrender.com/assistant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+    }
+  </script>
+
+</body>
+</html>
