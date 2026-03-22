@@ -49,6 +49,10 @@ class DeleteTaskAIRequest(BaseModel):
     text: str
 
 
+class AssistantRequest(BaseModel):
+    text: str
+
+
 @app.get("/")
 def root():
     return {"message": "Buro Assistant API is running 🚀"}
@@ -291,6 +295,159 @@ Required JSON format:
         "message": "Task deleted successfully",
         "deleted_task": deleted_task
     }
+
+
+@app.post("/assistant")
+def assistant(request: AssistantRequest):
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    db = SessionLocal()
+    tasks = db.query(Task).all()
+
+    task_list = []
+    for task in tasks:
+        task_list.append(
+            {
+                "id": task.id,
+                "title": task.title,
+                "deadline": task.deadline,
+                "priority": task.priority,
+            }
+        )
+
+    prompt = f"""
+You are an AI office assistant.
+
+Your job is to detect the user's intent and return ONLY valid JSON.
+Do not include markdown, code fences, or extra text.
+
+Available actions:
+- create
+- update
+- delete
+
+Current task list:
+{json.dumps(task_list)}
+
+User instruction:
+{request.text}
+
+Rules:
+- If the user wants to create a new task, return action=create.
+- If the user wants to update an existing task, return action=update and choose the correct task_id.
+- If the user wants to delete an existing task, return action=delete and choose the correct task_id.
+- For create, return task data.
+- For update, return task_id and updated task data.
+- For delete, return task_id.
+- priority must be one of: low, medium, high
+
+Required JSON format:
+{{
+  "action": "create or update or delete",
+  "task_id": 123,
+  "title": "task title or empty string",
+  "deadline": "deadline or Not specified",
+  "priority": "low or medium or high"
+}}
+"""
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt
+    )
+
+    output_text = response.output_text.strip()
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        db.close()
+        raise HTTPException(
+            status_code=500,
+            detail="AI response was not valid JSON"
+        )
+
+    action = parsed.get("action")
+
+    if action == "create":
+        db_task = Task(
+            title=parsed.get("title", ""),
+            deadline=parsed.get("deadline", "Not specified"),
+            priority=parsed.get("priority", "medium")
+        )
+        db.add(db_task)
+        db.commit()
+        db.refresh(db_task)
+
+        result = {
+            "action": "create",
+            "message": "Task created successfully",
+            "task": {
+                "id": db_task.id,
+                "title": db_task.title,
+                "deadline": db_task.deadline,
+                "priority": db_task.priority,
+            }
+        }
+        db.close()
+        return result
+
+    if action == "update":
+        task_id = parsed.get("task_id")
+        task = db.query(Task).filter(Task.id == task_id).first()
+
+        if not task:
+            db.close()
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        task.title = parsed.get("title", task.title)
+        task.deadline = parsed.get("deadline", task.deadline)
+        task.priority = parsed.get("priority", task.priority)
+
+        db.commit()
+        db.refresh(task)
+
+        result = {
+            "action": "update",
+            "message": "Task updated successfully",
+            "task": {
+                "id": task.id,
+                "title": task.title,
+                "deadline": task.deadline,
+                "priority": task.priority,
+            }
+        }
+        db.close()
+        return result
+
+    if action == "delete":
+        task_id = parsed.get("task_id")
+        task = db.query(Task).filter(Task.id == task_id).first()
+
+        if not task:
+            db.close()
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        deleted_task = {
+            "id": task.id,
+            "title": task.title,
+            "deadline": task.deadline,
+            "priority": task.priority,
+        }
+
+        db.delete(task)
+        db.commit()
+        db.close()
+
+        return {
+            "action": "delete",
+            "message": "Task deleted successfully",
+            "task": deleted_task
+        }
+
+    db.close()
+    raise HTTPException(status_code=400, detail="Invalid action returned by AI")
 
 
 @app.post("/analyze")
