@@ -310,6 +310,7 @@ Rules:
 - For clarify, set task_id to null and return a short question in clarify_message.
 - Match against the current task list carefully.
 - priority must be one of: low, medium, high
+- Always return a JSON object with an "actions" array.
 - If there is only one action, still return it inside the actions array.
 
 Required JSON format:
@@ -343,7 +344,10 @@ Required JSON format:
             detail="AI response was not valid JSON"
         )
 
-    actions = parsed.get("actions", [])
+    if isinstance(parsed, list):
+        actions = parsed
+    else:
+        actions = parsed.get("actions", [])
 
     if not actions:
         db.close()
