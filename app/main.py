@@ -53,6 +53,15 @@ class AssistantRequest(BaseModel):
     text: str
 
 
+def serialize_task(task: Task):
+    return {
+        "id": task.id,
+        "title": task.title,
+        "deadline": task.deadline,
+        "priority": task.priority,
+    }
+
+
 @app.get("/")
 def root():
     return {"message": "Buro Assistant API is running 🚀"}
@@ -66,20 +75,10 @@ def health():
 @app.get("/tasks")
 def get_tasks():
     db = SessionLocal()
-    tasks = db.query(Task).all()
-    result = []
-
-    for task in tasks:
-        result.append(
-            {
-                "id": task.id,
-                "title": task.title,
-                "deadline": task.deadline,
-                "priority": task.priority,
-            }
-        )
-
+    tasks = db.query(Task).order_by(Task.id.desc()).all()
+    result = [serialize_task(task) for task in tasks]
     db.close()
+
     return {
         "count": len(result),
         "tasks": result
@@ -95,13 +94,7 @@ def get_task(task_id: int):
         db.close()
         raise HTTPException(status_code=404, detail="Task not found")
 
-    result = {
-        "id": task.id,
-        "title": task.title,
-        "deadline": task.deadline,
-        "priority": task.priority,
-    }
-
+    result = serialize_task(task)
     db.close()
     return result
 
@@ -158,12 +151,7 @@ Return ONLY valid JSON.
 Do not include markdown, code fences, or extra text.
 
 Current task:
-{{
-  "id": {task.id},
-  "title": "{task.title}",
-  "deadline": "{task.deadline}",
-  "priority": "{task.priority}"
-}}
+{json.dumps(serialize_task(task))}
 
 User instruction:
 {request.text}
@@ -201,12 +189,7 @@ Required JSON format:
 
     result = {
         "message": "Task updated successfully",
-        "task": {
-            "id": task.id,
-            "title": task.title,
-            "deadline": task.deadline,
-            "priority": task.priority,
-        }
+        "task": serialize_task(task)
     }
 
     db.close()
@@ -216,22 +199,13 @@ Required JSON format:
 @app.post("/tasks/ai-delete")
 def ai_delete_task(request: DeleteTaskAIRequest):
     db = SessionLocal()
-    tasks = db.query(Task).all()
+    tasks = db.query(Task).order_by(Task.id.desc()).all()
 
     if not tasks:
         db.close()
         raise HTTPException(status_code=404, detail="No tasks found")
 
-    task_list = []
-    for task in tasks:
-        task_list.append(
-            {
-                "id": task.id,
-                "title": task.title,
-                "deadline": task.deadline,
-                "priority": task.priority,
-            }
-        )
+    task_list = [serialize_task(task) for task in tasks]
 
     prompt = f"""
 You are an AI office assistant.
@@ -280,12 +254,7 @@ Required JSON format:
         db.close()
         raise HTTPException(status_code=404, detail="Task not found")
 
-    deleted_task = {
-        "id": task.id,
-        "title": task.title,
-        "deadline": task.deadline,
-        "priority": task.priority,
-    }
+    deleted_task = serialize_task(task)
 
     db.delete(task)
     db.commit()
@@ -303,18 +272,8 @@ def assistant(request: AssistantRequest):
         raise HTTPException(status_code=400, detail="Text is required")
 
     db = SessionLocal()
-    tasks = db.query(Task).all()
-
-    task_list = []
-    for task in tasks:
-        task_list.append(
-            {
-                "id": task.id,
-                "title": task.title,
-                "deadline": task.deadline,
-                "priority": task.priority,
-            }
-        )
+    tasks = db.query(Task).order_by(Task.id.desc()).all()
+    task_list = [serialize_task(task) for task in tasks]
 
     prompt = f"""
 You are an AI office assistant.
@@ -326,6 +285,7 @@ Available actions:
 - create
 - update
 - delete
+- clarify
 
 Current task list:
 {json.dumps(task_list)}
@@ -334,21 +294,25 @@ User instruction:
 {request.text}
 
 Rules:
-- If the user wants to create a new task, return action=create.
-- If the user wants to update an existing task, return action=update and choose the correct task_id.
-- If the user wants to delete an existing task, return action=delete and choose the correct task_id.
-- For create, return task data.
-- For update, return task_id and updated task data.
-- For delete, return task_id.
+- Choose create only when the user wants a brand new task.
+- Choose update only when the user clearly refers to an existing task and wants it changed.
+- Choose delete only when the user clearly refers to an existing task and wants it removed.
+- Choose clarify when the instruction is ambiguous, unclear, or there is not enough information.
+- For create, set task_id to null and return title, deadline, and priority.
+- For update, return the correct task_id and the updated title, deadline, and priority.
+- For delete, return the correct task_id. Title, deadline, and priority can be empty strings.
+- For clarify, set task_id to null and return a short question in clarify_message.
+- Match against the current task list carefully. Prefer the best matching task title when the user refers to an existing task.
 - priority must be one of: low, medium, high
 
 Required JSON format:
 {{
-  "action": "create or update or delete",
+  "action": "create or update or delete or clarify",
   "task_id": 123,
   "title": "task title or empty string",
-  "deadline": "deadline or Not specified",
-  "priority": "low or medium or high"
+  "deadline": "deadline or Not specified or empty string",
+  "priority": "low or medium or high or empty string",
+  "clarify_message": "question or empty string"
 }}
 """
 
@@ -370,6 +334,13 @@ Required JSON format:
 
     action = parsed.get("action")
 
+    if action == "clarify":
+        db.close()
+        return {
+            "action": "clarify",
+            "message": parsed.get("clarify_message", "Please clarify your request.")
+        }
+
     if action == "create":
         db_task = Task(
             title=parsed.get("title", ""),
@@ -383,12 +354,7 @@ Required JSON format:
         result = {
             "action": "create",
             "message": "Task created successfully",
-            "task": {
-                "id": db_task.id,
-                "title": db_task.title,
-                "deadline": db_task.deadline,
-                "priority": db_task.priority,
-            }
+            "task": serialize_task(db_task)
         }
         db.close()
         return result
@@ -411,12 +377,7 @@ Required JSON format:
         result = {
             "action": "update",
             "message": "Task updated successfully",
-            "task": {
-                "id": task.id,
-                "title": task.title,
-                "deadline": task.deadline,
-                "priority": task.priority,
-            }
+            "task": serialize_task(task)
         }
         db.close()
         return result
@@ -429,12 +390,7 @@ Required JSON format:
             db.close()
             raise HTTPException(status_code=404, detail="Task not found")
 
-        deleted_task = {
-            "id": task.id,
-            "title": task.title,
-            "deadline": task.deadline,
-            "priority": task.priority,
-        }
+        deleted_task = serialize_task(task)
 
         db.delete(task)
         db.commit()
@@ -505,14 +461,7 @@ Email:
         db.commit()
         db.refresh(db_task)
 
-        saved_tasks.append(
-            {
-                "id": db_task.id,
-                "title": db_task.title,
-                "deadline": db_task.deadline,
-                "priority": db_task.priority
-            }
-        )
+        saved_tasks.append(serialize_task(db_task))
 
     db.close()
 
