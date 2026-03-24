@@ -3,3 +3,5 @@ uvicorn
 openai
 psycopg2-binary
 sqlalchemy
+pydantic[email]
+email-validator
