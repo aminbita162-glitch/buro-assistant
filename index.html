@@ -13,6 +13,18 @@
   <h2>Response:</h2>
   <pre id="output"></pre>
 
+  <h2>Search & Filters:</h2>
+  <input id="searchText" placeholder="Search text..." />
+  <input id="searchDeadline" placeholder="Deadline..." />
+  <select id="searchPriority">
+    <option value="">All priorities</option>
+    <option value="high">high</option>
+    <option value="medium">medium</option>
+    <option value="low">low</option>
+  </select>
+  <button onclick="applyFilters()">Apply Filters</button>
+  <button onclick="clearFilters()">Clear Filters</button>
+
   <h2>Tasks:</h2>
   <ul id="tasks"></ul>
 
@@ -65,8 +77,8 @@
       loadTasks();
     }
 
-    async function loadTasks() {
-      const res = await fetch("https://buro-assistant.onrender.com/tasks");
+    async function loadTasks(url = "https://buro-assistant.onrender.com/tasks") {
+      const res = await fetch(url);
       const data = await res.json();
 
       const list = document.getElementById("tasks");
@@ -94,6 +106,28 @@
 
         list.appendChild(li);
       });
+    }
+
+    function applyFilters() {
+      const q = document.getElementById("searchText").value;
+      const deadline = document.getElementById("searchDeadline").value;
+      const priority = document.getElementById("searchPriority").value;
+
+      const params = new URLSearchParams();
+
+      if (q) params.append("q", q);
+      if (deadline) params.append("deadline", deadline);
+      if (priority) params.append("priority", priority);
+
+      const url = `https://buro-assistant.onrender.com/tasks/search?${params.toString()}`;
+      loadTasks(url);
+    }
+
+    function clearFilters() {
+      document.getElementById("searchText").value = "";
+      document.getElementById("searchDeadline").value = "";
+      document.getElementById("searchPriority").value = "";
+      loadTasks();
     }
 
     loadTasks();
