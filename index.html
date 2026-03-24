@@ -274,6 +274,22 @@
   </div>
 
   <script>
+    const API_BASE = "https://buro-assistant.onrender.com";
+
+    function buildApiUrl(path, params = null) {
+      const url = new URL(path, API_BASE);
+
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && String(value).trim() !== "") {
+            url.searchParams.set(key, String(value).trim());
+          }
+        });
+      }
+
+      return url.toString();
+    }
+
     function showStatus(message, type) {
       const box = document.getElementById("statusBox");
       box.className = "status-box";
@@ -372,7 +388,7 @@
         showStatus("Sending request...", "loading");
         scrollToTopArea();
 
-        const res = await fetch("https://buro-assistant.onrender.com/assistant", {
+        const res = await fetch(buildApiUrl("/assistant"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -406,7 +422,7 @@
         showStatus("Deleting task...", "loading");
         scrollToTopArea();
 
-        const res = await fetch(`https://buro-assistant.onrender.com/tasks/${id}`, {
+        const res = await fetch(buildApiUrl(`/tasks/${id}`), {
           method: "DELETE"
         });
 
@@ -440,7 +456,7 @@
         showStatus("Updating task...", "loading");
         scrollToTopArea();
 
-        const res = await fetch(`https://buro-assistant.onrender.com/tasks/${id}/ai-update`, {
+        const res = await fetch(buildApiUrl(`/tasks/${id}/ai-update`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -475,9 +491,9 @@
       return "";
     }
 
-    async function loadTasks(url = "https://buro-assistant.onrender.com/tasks") {
+    async function loadTasks(params = null) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(buildApiUrl("/tasks/search", params || {}));
         const data = await res.json();
 
         const list = document.getElementById("tasks");
@@ -534,18 +550,13 @@
     }
 
     async function applyFilters() {
-      const q = document.getElementById("searchText").value;
-      const deadline = document.getElementById("searchDeadline").value;
-      const priority = document.getElementById("searchPriority").value;
+      const params = {
+        q: document.getElementById("searchText").value,
+        deadline: document.getElementById("searchDeadline").value,
+        priority: document.getElementById("searchPriority").value
+      };
 
-      const params = new URLSearchParams();
-
-      if (q) params.append("q", q);
-      if (deadline) params.append("deadline", deadline);
-      if (priority) params.append("priority", priority);
-
-      const url = `https://buro-assistant.onrender.com/tasks/search?${params.toString()}`;
-      await loadTasks(url);
+      await loadTasks(params);
       showStatus("Filters applied.", "success");
       scrollToTasks();
     }
