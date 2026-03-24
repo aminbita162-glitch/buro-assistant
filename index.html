@@ -2,31 +2,230 @@
 <html>
 <head>
   <title>Buro Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f7fb;
+      color: #1f2937;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      margin-bottom: 20px;
+      font-size: 32px;
+    }
+
+    h2 {
+      margin-top: 0;
+      margin-bottom: 16px;
+      font-size: 22px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    input,
+    select,
+    button,
+    textarea {
+      font-size: 16px;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+      padding: 12px 14px;
+    }
+
+    input,
+    select {
+      background: #ffffff;
+      min-width: 180px;
+      flex: 1;
+    }
+
+    button {
+      border: none;
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
+      transition: 0.2s ease;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    .secondary-btn {
+      background: #6b7280;
+    }
+
+    .edit-btn {
+      background: #f59e0b;
+      color: white;
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+
+    .delete-btn {
+      background: #ef4444;
+      color: white;
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #111827;
+      color: #f9fafb;
+      padding: 16px;
+      border-radius: 12px;
+      overflow-x: auto;
+      min-height: 80px;
+    }
+
+    #tasks {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .task-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      background: #f9fafb;
+      flex-wrap: wrap;
+    }
+
+    .task-text {
+      font-size: 16px;
+      line-height: 1.5;
+      flex: 1;
+      min-width: 220px;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: bold;
+      margin-left: 6px;
+    }
+
+    .priority-high {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .priority-medium {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .priority-low {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .section-title {
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .task-item {
+        align-items: flex-start;
+      }
+
+      .task-actions {
+        width: 100%;
+      }
+
+      .task-actions button {
+        flex: 1;
+      }
+    }
+  </style>
 </head>
 <body>
+  <div class="container">
 
-  <h1>🧠 Buro Assistant</h1>
+    <div class="card">
+      <h1>🧠 Buro Assistant</h1>
+      <div class="row">
+        <input id="input" placeholder="Type your task..." />
+        <button onclick="send()">Send</button>
+      </div>
+    </div>
 
-  <input id="input" placeholder="Type your task..." />
-  <button onclick="send()">Send</button>
+    <div class="card">
+      <h2 class="section-title">Response</h2>
+      <pre id="output"></pre>
+    </div>
 
-  <h2>Response:</h2>
-  <pre id="output"></pre>
+    <div class="card">
+      <h2 class="section-title">Search & Filters</h2>
+      <div class="row">
+        <input id="searchText" placeholder="Search text..." />
+        <input id="searchDeadline" placeholder="Deadline..." />
+        <select id="searchPriority">
+          <option value="">All priorities</option>
+          <option value="high">high</option>
+          <option value="medium">medium</option>
+          <option value="low">low</option>
+        </select>
+        <button onclick="applyFilters()">Apply Filters</button>
+        <button class="secondary-btn" onclick="clearFilters()">Clear Filters</button>
+      </div>
+    </div>
 
-  <h2>Search & Filters:</h2>
-  <input id="searchText" placeholder="Search text..." />
-  <input id="searchDeadline" placeholder="Deadline..." />
-  <select id="searchPriority">
-    <option value="">All priorities</option>
-    <option value="high">high</option>
-    <option value="medium">medium</option>
-    <option value="low">low</option>
-  </select>
-  <button onclick="applyFilters()">Apply Filters</button>
-  <button onclick="clearFilters()">Clear Filters</button>
+    <div class="card">
+      <h2 class="section-title">Tasks</h2>
+      <ul id="tasks"></ul>
+    </div>
 
-  <h2>Tasks:</h2>
-  <ul id="tasks"></ul>
+  </div>
 
   <script>
     async function send() {
@@ -77,6 +276,13 @@
       loadTasks();
     }
 
+    function getPriorityClass(priority) {
+      if (priority === "high") return "priority-high";
+      if (priority === "medium") return "priority-medium";
+      if (priority === "low") return "priority-low";
+      return "";
+    }
+
     async function loadTasks(url = "https://buro-assistant.onrender.com/tasks") {
       const res = await fetch(url);
       const data = await res.json();
@@ -86,23 +292,36 @@
 
       data.tasks.forEach(task => {
         const li = document.createElement("li");
+        li.className = "task-item";
 
-        const text = document.createElement("span");
-        text.innerText = `${task.id} - ${task.title} (${task.deadline}) [${task.priority}]`;
+        const text = document.createElement("div");
+        text.className = "task-text";
+
+        const badgeClass = getPriorityClass(task.priority);
+        text.innerHTML = `
+          <strong>#${task.id}</strong> - ${task.title}<br>
+          Deadline: ${task.deadline}
+          <span class="badge ${badgeClass}">${task.priority}</span>
+        `;
+
+        const actions = document.createElement("div");
+        actions.className = "task-actions";
 
         const editBtn = document.createElement("button");
+        editBtn.className = "edit-btn";
         editBtn.innerText = "Edit";
         editBtn.onclick = () => editTask(task.id);
 
         const deleteBtn = document.createElement("button");
+        deleteBtn.className = "delete-btn";
         deleteBtn.innerText = "Delete";
         deleteBtn.onclick = () => deleteTask(task.id);
 
+        actions.appendChild(editBtn);
+        actions.appendChild(deleteBtn);
+
         li.appendChild(text);
-        li.appendChild(document.createTextNode(" "));
-        li.appendChild(editBtn);
-        li.appendChild(document.createTextNode(" "));
-        li.appendChild(deleteBtn);
+        li.appendChild(actions);
 
         list.appendChild(li);
       });
@@ -132,6 +351,5 @@
 
     loadTasks();
   </script>
-
 </body>
 </html>
