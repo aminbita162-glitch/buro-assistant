@@ -65,7 +65,7 @@ def serialize_task(task: Task):
 
 @app.get("/")
 def root():
-    return FileResponse("app/static/index.html")
+    return FileResponse("index.html")
 
 
 @app.get("/health")
