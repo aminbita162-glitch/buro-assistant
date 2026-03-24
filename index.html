@@ -8,6 +8,10 @@
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
       font-family: Arial, sans-serif;
@@ -232,7 +236,7 @@
 <body>
   <div class="container">
 
-    <div class="card">
+    <div class="card" id="topCard">
       <h1>🧠 Buro Assistant</h1>
       <div class="row">
         <input id="input" placeholder="Type your task..." />
@@ -241,7 +245,7 @@
       <div id="statusBox" class="status-box status-neutral">Ready</div>
     </div>
 
-    <div class="card">
+    <div class="card" id="responseCard">
       <h2 class="section-title">Response</h2>
       <pre id="output"></pre>
     </div>
@@ -262,7 +266,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="tasksCard">
       <h2 class="section-title">Tasks</h2>
       <ul id="tasks"></ul>
     </div>
@@ -281,6 +285,27 @@
       const box = document.getElementById("statusBox");
       box.className = "status-box status-neutral";
       box.innerText = "Ready";
+    }
+
+    function scrollToTopArea() {
+      const topCard = document.getElementById("topCard");
+      if (topCard) {
+        topCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    function scrollToResponse() {
+      const responseCard = document.getElementById("responseCard");
+      if (responseCard) {
+        responseCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    function scrollToTasks() {
+      const tasksCard = document.getElementById("tasksCard");
+      if (tasksCard) {
+        tasksCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
 
     function formatTaskLine(task) {
@@ -339,11 +364,13 @@
 
       if (!text.trim()) {
         showStatus("Please enter a task instruction.", "error");
+        scrollToTopArea();
         return;
       }
 
       try {
         showStatus("Sending request...", "loading");
+        scrollToTopArea();
 
         const res = await fetch("https://buro-assistant.onrender.com/assistant", {
           method: "POST",
@@ -359,21 +386,25 @@
 
         if (!res.ok) {
           showStatus("Request failed.", "error");
+          scrollToResponse();
           return;
         }
 
         showStatus("Task request completed successfully.", "success");
         document.getElementById("input").value = "";
-        loadTasks();
+        await loadTasks();
+        scrollToTopArea();
       } catch (error) {
         document.getElementById("output").innerText = String(error);
         showStatus("Network or server error.", "error");
+        scrollToResponse();
       }
     }
 
     async function deleteTask(id) {
       try {
         showStatus("Deleting task...", "loading");
+        scrollToTopArea();
 
         const res = await fetch(`https://buro-assistant.onrender.com/tasks/${id}`, {
           method: "DELETE"
@@ -384,14 +415,17 @@
 
         if (!res.ok) {
           showStatus("Delete failed.", "error");
+          scrollToResponse();
           return;
         }
 
         showStatus("Task deleted successfully.", "success");
-        loadTasks();
+        await loadTasks();
+        scrollToTopArea();
       } catch (error) {
         document.getElementById("output").innerText = String(error);
         showStatus("Network or server error while deleting.", "error");
+        scrollToResponse();
       }
     }
 
@@ -404,6 +438,7 @@
 
       try {
         showStatus("Updating task...", "loading");
+        scrollToTopArea();
 
         const res = await fetch(`https://buro-assistant.onrender.com/tasks/${id}/ai-update`, {
           method: "POST",
@@ -419,14 +454,17 @@
 
         if (!res.ok) {
           showStatus("Update failed.", "error");
+          scrollToResponse();
           return;
         }
 
         showStatus("Task updated successfully.", "success");
-        loadTasks();
+        await loadTasks();
+        scrollToTopArea();
       } catch (error) {
         document.getElementById("output").innerText = String(error);
         showStatus("Network or server error while updating.", "error");
+        scrollToResponse();
       }
     }
 
@@ -491,10 +529,11 @@
       } catch (error) {
         document.getElementById("output").innerText = String(error);
         showStatus("Failed to load tasks.", "error");
+        scrollToResponse();
       }
     }
 
-    function applyFilters() {
+    async function applyFilters() {
       const q = document.getElementById("searchText").value;
       const deadline = document.getElementById("searchDeadline").value;
       const priority = document.getElementById("searchPriority").value;
@@ -506,16 +545,18 @@
       if (priority) params.append("priority", priority);
 
       const url = `https://buro-assistant.onrender.com/tasks/search?${params.toString()}`;
-      loadTasks(url);
+      await loadTasks(url);
       showStatus("Filters applied.", "success");
+      scrollToTasks();
     }
 
-    function clearFilters() {
+    async function clearFilters() {
       document.getElementById("searchText").value = "";
       document.getElementById("searchDeadline").value = "";
       document.getElementById("searchPriority").value = "";
-      loadTasks();
+      await loadTasks();
       showStatus("Filters cleared.", "success");
+      scrollToTasks();
     }
 
     loadTasks();
