@@ -35,6 +35,14 @@
       loadTasks();
     }
 
+    async function deleteTask(id) {
+      await fetch(`https://buro-assistant.onrender.com/tasks/${id}`, {
+        method: "DELETE"
+      });
+
+      loadTasks();
+    }
+
     async function loadTasks() {
       const res = await fetch("https://buro-assistant.onrender.com/tasks");
       const data = await res.json();
@@ -44,7 +52,18 @@
 
       data.tasks.forEach(task => {
         const li = document.createElement("li");
-        li.innerText = `${task.id} - ${task.title} (${task.deadline}) [${task.priority}]`;
+
+        const text = document.createElement("span");
+        text.innerText = `${task.id} - ${task.title} (${task.deadline}) [${task.priority}]`;
+
+        const btn = document.createElement("button");
+        btn.innerText = "Delete";
+        btn.onclick = () => deleteTask(task.id);
+
+        li.appendChild(text);
+        li.appendChild(document.createTextNode(" "));
+        li.appendChild(btn);
+
         list.appendChild(li);
       });
     }
