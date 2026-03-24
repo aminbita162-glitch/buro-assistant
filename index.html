@@ -170,25 +170,33 @@
       padding: 12px 14px;
       border-radius: 12px;
       font-size: 15px;
-      display: none;
+      display: block;
+      min-height: 48px;
+      border: 1px solid transparent;
+    }
+
+    .status-neutral {
+      background: #f3f4f6;
+      color: #374151;
+      border-color: #e5e7eb;
     }
 
     .status-loading {
-      display: block;
       background: #dbeafe;
       color: #1d4ed8;
+      border-color: #93c5fd;
     }
 
     .status-success {
-      display: block;
       background: #dcfce7;
       color: #166534;
+      border-color: #86efac;
     }
 
     .status-error {
-      display: block;
       background: #fee2e2;
       color: #b91c1c;
+      border-color: #fca5a5;
     }
 
     .empty-state {
@@ -230,7 +238,7 @@
         <input id="input" placeholder="Type your task..." />
         <button onclick="send()">Send</button>
       </div>
-      <div id="statusBox" class="status-box"></div>
+      <div id="statusBox" class="status-box status-neutral">Ready</div>
     </div>
 
     <div class="card">
@@ -271,8 +279,8 @@
 
     function clearStatus() {
       const box = document.getElementById("statusBox");
-      box.className = "status-box";
-      box.innerText = "";
+      box.className = "status-box status-neutral";
+      box.innerText = "Ready";
     }
 
     async function send() {
