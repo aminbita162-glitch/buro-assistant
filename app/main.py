@@ -1,9 +1,11 @@
 import json
 import os
+import hashlib
+import secrets
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from openai import OpenAI
 
 from sqlalchemy import create_engine, Column, Integer, String, or_
@@ -18,6 +20,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+auth_tokens = {}
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
 
 
 class Task(Base):
@@ -54,6 +67,29 @@ class AssistantRequest(BaseModel):
     text: str
 
 
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+def hash_password(password: str):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def serialize_user(user: User):
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+    }
+
+
 def serialize_task(task: Task):
     return {
         "id": task.id,
@@ -61,6 +97,23 @@ def serialize_task(task: Task):
         "deadline": task.deadline,
         "priority": task.priority,
     }
+
+
+def get_current_user_from_token(db, authorization: str | None):
+    if not authorization:
+        return None
+
+    if not authorization.startswith("Bearer "):
+        return None
+
+    token = authorization.replace("Bearer ", "").strip()
+    user_id = auth_tokens.get(token)
+
+    if not user_id:
+        return None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    return user
 
 
 @app.get("/")
@@ -71,6 +124,82 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/auth/signup")
+def signup(request: SignupRequest):
+    db = SessionLocal()
+
+    existing_user = db.query(User).filter(User.email == request.email.strip().lower()).first()
+
+    if existing_user:
+        db.close()
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    if len(request.password.strip()) < 6:
+        db.close()
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    user = User(
+        name=request.name.strip(),
+        email=request.email.strip().lower(),
+        password_hash=hash_password(request.password.strip())
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    db.close()
+
+    return {
+        "message": "User created successfully",
+        "user": serialize_user(user)
+    }
+
+
+@app.post("/auth/login")
+def login(request: LoginRequest):
+    db = SessionLocal()
+
+    user = db.query(User).filter(User.email == request.email.strip().lower()).first()
+
+    if not user:
+        db.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.password_hash != hash_password(request.password.strip()):
+        db.close()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = secrets.token_hex(24)
+    auth_tokens[token] = user.id
+
+    result = {
+        "message": "Login successful",
+        "token": token,
+        "user": serialize_user(user)
+    }
+
+    db.close()
+    return result
+
+
+@app.get("/auth/me")
+def auth_me(authorization: str | None = Header(default=None)):
+    db = SessionLocal()
+    user = get_current_user_from_token(db, authorization)
+
+    if not user:
+        db.close()
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = {
+        "message": "Authenticated user",
+        "user": serialize_user(user)
+    }
+
+    db.close()
+    return result
 
 
 @app.get("/stats")
