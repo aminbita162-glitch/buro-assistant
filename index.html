@@ -283,6 +283,57 @@
       box.innerText = "Ready";
     }
 
+    function formatTaskLine(task) {
+      return `#${task.id} - ${task.title} | Deadline: ${task.deadline} | Priority: ${task.priority}`;
+    }
+
+    function formatResponse(data) {
+      if (!data) {
+        return "No response received.";
+      }
+
+      if (data.action === "clarify") {
+        return `Clarification needed:\n${data.message || "Please clarify your request."}`;
+      }
+
+      if (data.action === "create" && data.task) {
+        return `Task created successfully.\n${formatTaskLine(data.task)}`;
+      }
+
+      if (data.action === "update" && data.task) {
+        return `Task updated successfully.\n${formatTaskLine(data.task)}`;
+      }
+
+      if (data.action === "delete" && data.task) {
+        return `Task deleted successfully.\n${formatTaskLine(data.task)}`;
+      }
+
+      if (data.deleted_task) {
+        return `Task deleted successfully.\n${formatTaskLine(data.deleted_task)}`;
+      }
+
+      if (data.task) {
+        return `${data.message || "Task processed successfully."}\n${formatTaskLine(data.task)}`;
+      }
+
+      if (data.results && Array.isArray(data.results)) {
+        const lines = data.results.map(item => {
+          if (item.task) {
+            return `${item.action.toUpperCase()}: ${formatTaskLine(item.task)}`;
+          }
+          return `${item.action.toUpperCase()}: completed`;
+        });
+
+        return `${data.message || "Multiple actions completed successfully."}\n\n${lines.join("\n")}`;
+      }
+
+      if (data.message) {
+        return data.message;
+      }
+
+      return JSON.stringify(data, null, 2);
+    }
+
     async function send() {
       const text = document.getElementById("input").value;
 
@@ -304,7 +355,7 @@
 
         const data = await res.json();
 
-        document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+        document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
           showStatus("Request failed.", "error");
@@ -329,7 +380,7 @@
         });
 
         const data = await res.json();
-        document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+        document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
           showStatus("Delete failed.", "error");
@@ -364,7 +415,7 @@
 
         const data = await res.json();
 
-        document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+        document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
           showStatus("Update failed.", "error");
