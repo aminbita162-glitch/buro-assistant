@@ -13,6 +13,9 @@
   <h2>Response:</h2>
   <pre id="output"></pre>
 
+  <h2>Tasks:</h2>
+  <ul id="tasks"></ul>
+
   <script>
     async function send() {
       const text = document.getElementById("input").value;
@@ -28,7 +31,25 @@
       const data = await res.json();
 
       document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+
+      loadTasks();
     }
+
+    async function loadTasks() {
+      const res = await fetch("https://buro-assistant.onrender.com/tasks");
+      const data = await res.json();
+
+      const list = document.getElementById("tasks");
+      list.innerHTML = "";
+
+      data.tasks.forEach(task => {
+        const li = document.createElement("li");
+        li.innerText = `${task.id} - ${task.title} (${task.deadline}) [${task.priority}]`;
+        list.appendChild(li);
+      });
+    }
+
+    loadTasks();
   </script>
 
 </body>
