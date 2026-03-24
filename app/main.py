@@ -2,6 +2,7 @@ import json
 import os
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from openai import OpenAI
 
@@ -64,7 +65,7 @@ def serialize_task(task: Task):
 
 @app.get("/")
 def root():
-    return {"message": "Buro Assistant API is running 🚀"}
+    return FileResponse("app/static/index.html")
 
 
 @app.get("/health")
