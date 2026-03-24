@@ -18,7 +18,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
 auth_tokens = {}
@@ -78,6 +78,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def normalize_email(email):
+    return str(email).strip().lower()
+
+
 def hash_password(password: str):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
@@ -130,76 +134,85 @@ def health():
 def signup(request: SignupRequest):
     db = SessionLocal()
 
-    existing_user = db.query(User).filter(User.email == request.email.strip().lower()).first()
+    try:
+        email = normalize_email(request.email)
+        password = request.password.strip()
+        name = request.name.strip()
 
-    if existing_user:
+        existing_user = db.query(User).filter(User.email == email).first()
+
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already exists")
+
+        if len(password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+        user = User(
+            name=name,
+            email=email,
+            password_hash=hash_password(password)
+        )
+
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        return {
+            "message": "User created successfully",
+            "user": serialize_user(user)
+        }
+    finally:
         db.close()
-        raise HTTPException(status_code=400, detail="Email already exists")
-
-    if len(request.password.strip()) < 6:
-        db.close()
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-
-    user = User(
-        name=request.name.strip(),
-        email=request.email.strip().lower(),
-        password_hash=hash_password(request.password.strip())
-    )
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    db.close()
-
-    return {
-        "message": "User created successfully",
-        "user": serialize_user(user)
-    }
 
 
 @app.post("/auth/login")
 def login(request: LoginRequest):
     db = SessionLocal()
 
-    user = db.query(User).filter(User.email == request.email.strip().lower()).first()
+    try:
+        email = normalize_email(request.email)
+        password = request.password.strip()
+        password_hash = hash_password(password)
 
-    if not user:
+        user = db.query(User).filter(User.email == email).first()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        if not user.password_hash:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        if user.password_hash != password_hash:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        token = secrets.token_hex(24)
+        auth_tokens[token] = user.id
+
+        return {
+            "message": "Login successful",
+            "token": token,
+            "user": serialize_user(user)
+        }
+    finally:
         db.close()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    if user.password_hash != hash_password(request.password.strip()):
-        db.close()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    token = secrets.token_hex(24)
-    auth_tokens[token] = user.id
-
-    result = {
-        "message": "Login successful",
-        "token": token,
-        "user": serialize_user(user)
-    }
-
-    db.close()
-    return result
 
 
 @app.get("/auth/me")
 def auth_me(authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    user = get_current_user_from_token(db, authorization)
 
-    if not user:
+    try:
+        user = get_current_user_from_token(db, authorization)
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        return {
+            "message": "Authenticated user",
+            "user": serialize_user(user)
+        }
+    finally:
         db.close()
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    result = {
-        "message": "Authenticated user",
-        "user": serialize_user(user)
-    }
-
-    db.close()
-    return result
 
 
 @app.get("/stats")
