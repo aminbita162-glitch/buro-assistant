@@ -43,6 +43,28 @@
       loadTasks();
     }
 
+    async function editTask(id) {
+      const text = prompt("Enter update instruction for this task:");
+
+      if (!text) {
+        return;
+      }
+
+      const res = await fetch(`https://buro-assistant.onrender.com/tasks/${id}/ai-update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("output").innerText = JSON.stringify(data, null, 2);
+
+      loadTasks();
+    }
+
     async function loadTasks() {
       const res = await fetch("https://buro-assistant.onrender.com/tasks");
       const data = await res.json();
@@ -56,13 +78,19 @@
         const text = document.createElement("span");
         text.innerText = `${task.id} - ${task.title} (${task.deadline}) [${task.priority}]`;
 
-        const btn = document.createElement("button");
-        btn.innerText = "Delete";
-        btn.onclick = () => deleteTask(task.id);
+        const editBtn = document.createElement("button");
+        editBtn.innerText = "Edit";
+        editBtn.onclick = () => editTask(task.id);
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.innerText = "Delete";
+        deleteBtn.onclick = () => deleteTask(task.id);
 
         li.appendChild(text);
         li.appendChild(document.createTextNode(" "));
-        li.appendChild(btn);
+        li.appendChild(editBtn);
+        li.appendChild(document.createTextNode(" "));
+        li.appendChild(deleteBtn);
 
         list.appendChild(li);
       });
