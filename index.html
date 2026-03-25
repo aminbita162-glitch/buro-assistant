@@ -45,6 +45,12 @@
       font-size: 22px;
     }
 
+    h3 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 18px;
+    }
+
     .row {
       display: flex;
       gap: 10px;
@@ -96,6 +102,10 @@
       color: white;
       padding: 8px 12px;
       font-size: 14px;
+    }
+
+    .auth-btn {
+      min-width: 140px;
     }
 
     pre {
@@ -210,6 +220,39 @@
       color: #6b7280;
     }
 
+    .auth-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .auth-box {
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 16px;
+      background: #f9fafb;
+    }
+
+    .user-box {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      border: 1px solid #bfdbfe;
+      display: none;
+    }
+
+    .user-box.active {
+      display: block;
+    }
+
+    .muted-text {
+      color: #6b7280;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+
     @media (max-width: 640px) {
       .container {
         padding: 14px;
@@ -230,6 +273,10 @@
       .task-actions button {
         flex: 1;
       }
+
+      .auth-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -243,6 +290,37 @@
         <button onclick="send()">Send</button>
       </div>
       <div id="statusBox" class="status-box status-neutral">Ready</div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Account</h2>
+
+      <div class="auth-grid">
+        <div class="auth-box">
+          <h3>Sign Up</h3>
+          <div class="row">
+            <input id="signupName" placeholder="Name" />
+            <input id="signupEmail" placeholder="Email" />
+            <input id="signupPassword" type="password" placeholder="Password" />
+            <button class="auth-btn" onclick="signup()">Create Account</button>
+          </div>
+        </div>
+
+        <div class="auth-box">
+          <h3>Login</h3>
+          <div class="row">
+            <input id="loginEmail" placeholder="Email" />
+            <input id="loginPassword" type="password" placeholder="Password" />
+            <button class="auth-btn" onclick="login()">Login</button>
+            <button class="secondary-btn auth-btn" onclick="logout()">Logout</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="userBox" class="user-box"></div>
+      <div class="muted-text">
+        When you are logged in, task requests will be sent with your token and only your tasks will be loaded.
+      </div>
     </div>
 
     <div class="card" id="responseCard">
@@ -290,6 +368,48 @@
       return url.toString();
     }
 
+    function getToken() {
+      return localStorage.getItem("buro_token") || "";
+    }
+
+    function getStoredUser() {
+      const raw = localStorage.getItem("buro_user");
+      if (!raw) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(raw);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function setAuthData(token, user) {
+      localStorage.setItem("buro_token", token);
+      localStorage.setItem("buro_user", JSON.stringify(user));
+    }
+
+    function clearAuthData() {
+      localStorage.removeItem("buro_token");
+      localStorage.removeItem("buro_user");
+    }
+
+    function buildHeaders(includeJson = false) {
+      const headers = {};
+
+      if (includeJson) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const token = getToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      return headers;
+    }
+
     function showStatus(message, type) {
       const box = document.getElementById("statusBox");
       box.className = "status-box";
@@ -324,6 +444,20 @@
       }
     }
 
+    function renderUserBox() {
+      const user = getStoredUser();
+      const token = getToken();
+      const box = document.getElementById("userBox");
+
+      if (user && token) {
+        box.className = "user-box active";
+        box.innerText = `Logged in as ${user.name} (${user.email})`;
+      } else {
+        box.className = "user-box";
+        box.innerText = "";
+      }
+    }
+
     function formatTaskLine(task) {
       return `#${task.id} - ${task.title} | Deadline: ${task.deadline} | Priority: ${task.priority}`;
     }
@@ -353,6 +487,14 @@
         return `Task deleted successfully.\n${formatTaskLine(data.deleted_task)}`;
       }
 
+      if (data.user && data.message && data.token) {
+        return `${data.message}\nUser: ${data.user.name} (${data.user.email})\nToken saved successfully.`;
+      }
+
+      if (data.user && data.message) {
+        return `${data.message}\nUser: ${data.user.name} (${data.user.email})`;
+      }
+
       if (data.task) {
         return `${data.message || "Task processed successfully."}\n${formatTaskLine(data.task)}`;
       }
@@ -368,11 +510,111 @@
         return `${data.message || "Multiple actions completed successfully."}\n\n${lines.join("\n")}`;
       }
 
+      if (data.created_tasks && Array.isArray(data.created_tasks)) {
+        const lines = data.created_tasks.map(task => formatTaskLine(task));
+        return `${data.summary || "Email analyzed successfully."}\n\n${lines.join("\n")}`;
+      }
+
       if (data.message) {
         return data.message;
       }
 
       return JSON.stringify(data, null, 2);
+    }
+
+    async function signup() {
+      const name = document.getElementById("signupName").value.trim();
+      const email = document.getElementById("signupEmail").value.trim();
+      const password = document.getElementById("signupPassword").value.trim();
+
+      if (!name || !email || !password) {
+        showStatus("Please complete all signup fields.", "error");
+        scrollToTopArea();
+        return;
+      }
+
+      try {
+        showStatus("Creating account...", "loading");
+        scrollToTopArea();
+
+        const res = await fetch(buildApiUrl("/auth/signup"), {
+          method: "POST",
+          headers: buildHeaders(true),
+          body: JSON.stringify({ name, email, password })
+        });
+
+        const data = await res.json();
+        document.getElementById("output").innerText = formatResponse(data);
+
+        if (!res.ok) {
+          showStatus(data.detail || "Signup failed.", "error");
+          scrollToResponse();
+          return;
+        }
+
+        showStatus("Account created successfully.", "success");
+        document.getElementById("signupName").value = "";
+        document.getElementById("signupEmail").value = "";
+        document.getElementById("signupPassword").value = "";
+        scrollToTopArea();
+      } catch (error) {
+        document.getElementById("output").innerText = String(error);
+        showStatus("Network or server error during signup.", "error");
+        scrollToResponse();
+      }
+    }
+
+    async function login() {
+      const email = document.getElementById("loginEmail").value.trim();
+      const password = document.getElementById("loginPassword").value.trim();
+
+      if (!email || !password) {
+        showStatus("Please enter email and password.", "error");
+        scrollToTopArea();
+        return;
+      }
+
+      try {
+        showStatus("Logging in...", "loading");
+        scrollToTopArea();
+
+        const res = await fetch(buildApiUrl("/auth/login"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+        document.getElementById("output").innerText = formatResponse(data);
+
+        if (!res.ok) {
+          showStatus(data.detail || "Login failed.", "error");
+          scrollToResponse();
+          return;
+        }
+
+        setAuthData(data.token, data.user);
+        renderUserBox();
+        showStatus("Login successful.", "success");
+        document.getElementById("loginPassword").value = "";
+        await loadTasks();
+        scrollToTopArea();
+      } catch (error) {
+        document.getElementById("output").innerText = String(error);
+        showStatus("Network or server error during login.", "error");
+        scrollToResponse();
+      }
+    }
+
+    function logout() {
+      clearAuthData();
+      renderUserBox();
+      document.getElementById("output").innerText = "Logged out successfully.";
+      showStatus("Logged out successfully.", "success");
+      loadTasks();
+      scrollToTopArea();
     }
 
     async function send() {
@@ -390,18 +632,15 @@
 
         const res = await fetch(buildApiUrl("/assistant"), {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: buildHeaders(true),
           body: JSON.stringify({ text })
         });
 
         const data = await res.json();
-
         document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
-          showStatus("Request failed.", "error");
+          showStatus(data.detail || "Request failed.", "error");
           scrollToResponse();
           return;
         }
@@ -423,14 +662,15 @@
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl(`/tasks/${id}`), {
-          method: "DELETE"
+          method: "DELETE",
+          headers: buildHeaders()
         });
 
         const data = await res.json();
         document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
-          showStatus("Delete failed.", "error");
+          showStatus(data.detail || "Delete failed.", "error");
           scrollToResponse();
           return;
         }
@@ -458,18 +698,15 @@
 
         const res = await fetch(buildApiUrl(`/tasks/${id}/ai-update`), {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: buildHeaders(true),
           body: JSON.stringify({ text })
         });
 
         const data = await res.json();
-
         document.getElementById("output").innerText = formatResponse(data);
 
         if (!res.ok) {
-          showStatus("Update failed.", "error");
+          showStatus(data.detail || "Update failed.", "error");
           scrollToResponse();
           return;
         }
@@ -493,7 +730,10 @@
 
     async function loadTasks(params = null) {
       try {
-        const res = await fetch(buildApiUrl("/tasks/search", params || {}));
+        const res = await fetch(buildApiUrl("/tasks/search", params || {}), {
+          headers: buildHeaders()
+        });
+
         const data = await res.json();
 
         const list = document.getElementById("tasks");
@@ -570,6 +810,7 @@
       scrollToTasks();
     }
 
+    renderUserBox();
     loadTasks();
   </script>
 </body>
