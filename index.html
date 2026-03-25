@@ -372,6 +372,10 @@
       return localStorage.getItem("buro_token") || "";
     }
 
+    function isLoggedIn() {
+      return !!getToken();
+    }
+
     function getStoredUser() {
       const raw = localStorage.getItem("buro_user");
       if (!raw) {
@@ -458,6 +462,24 @@
       }
     }
 
+    function renderEmptyTasks(message) {
+      const list = document.getElementById("tasks");
+      list.innerHTML = "";
+
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.innerText = message;
+      list.appendChild(empty);
+    }
+
+    function handleUnauthorized(message = "Your session has expired. Please login again.") {
+      clearAuthData();
+      renderUserBox();
+      renderEmptyTasks("Please login to view your tasks.");
+      document.getElementById("output").innerText = message;
+      showStatus(message, "error");
+    }
+
     function formatTaskLine(task) {
       return `#${task.id} - ${task.title} | Deadline: ${task.deadline} | Priority: ${task.priority}`;
     }
@@ -515,6 +537,10 @@
         return `${data.summary || "Email analyzed successfully."}\n\n${lines.join("\n")}`;
       }
 
+      if (data.detail) {
+        return data.detail;
+      }
+
       if (data.message) {
         return data.message;
       }
@@ -539,7 +565,7 @@
 
         const res = await fetch(buildApiUrl("/auth/signup"), {
           method: "POST",
-          headers: buildHeaders(true),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, email, password })
         });
 
@@ -556,6 +582,10 @@
         document.getElementById("signupName").value = "";
         document.getElementById("signupEmail").value = "";
         document.getElementById("signupPassword").value = "";
+
+        document.getElementById("loginEmail").value = email;
+        document.getElementById("loginPassword").focus();
+
         scrollToTopArea();
       } catch (error) {
         document.getElementById("output").innerText = String(error);
@@ -611,16 +641,23 @@
     function logout() {
       clearAuthData();
       renderUserBox();
+      renderEmptyTasks("Please login to view your tasks.");
       document.getElementById("output").innerText = "Logged out successfully.";
       showStatus("Logged out successfully.", "success");
-      loadTasks();
       scrollToTopArea();
     }
 
     async function send() {
-      const text = document.getElementById("input").value;
+      const text = document.getElementById("input").value.trim();
 
-      if (!text.trim()) {
+      if (!isLoggedIn()) {
+        showStatus("Please login first.", "error");
+        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        scrollToTopArea();
+        return;
+      }
+
+      if (!text) {
         showStatus("Please enter a task instruction.", "error");
         scrollToTopArea();
         return;
@@ -638,6 +675,12 @@
 
         const data = await res.json();
         document.getElementById("output").innerText = formatResponse(data);
+
+        if (res.status === 401) {
+          handleUnauthorized();
+          scrollToResponse();
+          return;
+        }
 
         if (!res.ok) {
           showStatus(data.detail || "Request failed.", "error");
@@ -657,6 +700,13 @@
     }
 
     async function deleteTask(id) {
+      if (!isLoggedIn()) {
+        showStatus("Please login first.", "error");
+        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        scrollToTopArea();
+        return;
+      }
+
       try {
         showStatus("Deleting task...", "loading");
         scrollToTopArea();
@@ -668,6 +718,12 @@
 
         const data = await res.json();
         document.getElementById("output").innerText = formatResponse(data);
+
+        if (res.status === 401) {
+          handleUnauthorized();
+          scrollToResponse();
+          return;
+        }
 
         if (!res.ok) {
           showStatus(data.detail || "Delete failed.", "error");
@@ -686,6 +742,13 @@
     }
 
     async function editTask(id) {
+      if (!isLoggedIn()) {
+        showStatus("Please login first.", "error");
+        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        scrollToTopArea();
+        return;
+      }
+
       const text = prompt("Enter update instruction for this task:");
 
       if (!text) {
@@ -704,6 +767,12 @@
 
         const data = await res.json();
         document.getElementById("output").innerText = formatResponse(data);
+
+        if (res.status === 401) {
+          handleUnauthorized();
+          scrollToResponse();
+          return;
+        }
 
         if (!res.ok) {
           showStatus(data.detail || "Update failed.", "error");
@@ -729,6 +798,11 @@
     }
 
     async function loadTasks(params = null) {
+      if (!isLoggedIn()) {
+        renderEmptyTasks("Please login to view your tasks.");
+        return;
+      }
+
       try {
         const res = await fetch(buildApiUrl("/tasks/search", params || {}), {
           headers: buildHeaders()
@@ -736,14 +810,16 @@
 
         const data = await res.json();
 
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+
         const list = document.getElementById("tasks");
         list.innerHTML = "";
 
         if (!data.tasks || data.tasks.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "empty-state";
-          empty.innerText = "No tasks found.";
-          list.appendChild(empty);
+          renderEmptyTasks("No tasks found.");
           return;
         }
 
@@ -790,6 +866,13 @@
     }
 
     async function applyFilters() {
+      if (!isLoggedIn()) {
+        showStatus("Please login first.", "error");
+        renderEmptyTasks("Please login to view your tasks.");
+        scrollToTasks();
+        return;
+      }
+
       const params = {
         q: document.getElementById("searchText").value,
         deadline: document.getElementById("searchDeadline").value,
@@ -805,6 +888,7 @@
       document.getElementById("searchText").value = "";
       document.getElementById("searchDeadline").value = "";
       document.getElementById("searchPriority").value = "";
+
       await loadTasks();
       showStatus("Filters cleared.", "success");
       scrollToTasks();
