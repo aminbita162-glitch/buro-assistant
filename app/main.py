@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
 from openai import OpenAI
 
-from sqlalchemy import create_engine, Column, Integer, String, or_
+from sqlalchemy import create_engine, Column, Integer, String, or_, text, inspect
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 app = FastAPI()
@@ -40,9 +40,22 @@ class Task(Base):
     title = Column(String)
     deadline = Column(String)
     priority = Column(String)
+    user_id = Column(Integer, index=True, nullable=True)
 
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_tasks_user_id_column():
+    inspector = inspect(engine)
+    columns = [column["name"] for column in inspector.get_columns("tasks")]
+
+    if "user_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
+
+
+ensure_tasks_user_id_column()
 
 
 class EmailRequest(BaseModel):
@@ -100,6 +113,7 @@ def serialize_task(task: Task):
         "title": task.title,
         "deadline": task.deadline,
         "priority": task.priority,
+        "user_id": task.user_id,
     }
 
 
@@ -117,6 +131,15 @@ def get_current_user_from_token(db, authorization: str | None):
         return None
 
     user = db.query(User).filter(User.id == user_id).first()
+    return user
+
+
+def require_current_user(db, authorization: str | None):
+    user = get_current_user_from_token(db, authorization)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     return user
 
 
@@ -216,149 +239,203 @@ def auth_me(authorization: str | None = Header(default=None)):
 
 
 @app.get("/stats")
-def get_stats():
+def get_stats(authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
 
-    total = len(tasks)
-    high_count = 0
-    medium_count = 0
-    low_count = 0
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task)
 
-    for task in tasks:
-        priority = (task.priority or "").lower()
+        if user:
+            query = query.filter(Task.user_id == user.id)
 
-        if priority == "high":
-            high_count += 1
-        elif priority == "medium":
-            medium_count += 1
-        elif priority == "low":
-            low_count += 1
+        tasks = query.order_by(Task.id.desc()).all()
 
-    recent_tasks = [serialize_task(task) for task in tasks[:5]]
+        total = len(tasks)
+        high_count = 0
+        medium_count = 0
+        low_count = 0
 
-    db.close()
+        for task in tasks:
+            priority = (task.priority or "").lower()
 
-    return {
-        "total_tasks": total,
-        "high_priority_tasks": high_count,
-        "medium_priority_tasks": medium_count,
-        "low_priority_tasks": low_count,
-        "recent_tasks": recent_tasks
-    }
+            if priority == "high":
+                high_count += 1
+            elif priority == "medium":
+                medium_count += 1
+            elif priority == "low":
+                low_count += 1
+
+        recent_tasks = [serialize_task(task) for task in tasks[:5]]
+
+        return {
+            "total_tasks": total,
+            "high_priority_tasks": high_count,
+            "medium_priority_tasks": medium_count,
+            "low_priority_tasks": low_count,
+            "recent_tasks": recent_tasks
+        }
+    finally:
+        db.close()
 
 
 @app.get("/tasks")
-def get_tasks():
+def get_tasks(authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
-    result = [serialize_task(task) for task in tasks]
-    db.close()
 
-    return {
-        "count": len(result),
-        "tasks": result
-    }
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        tasks = query.order_by(Task.id.desc()).all()
+        result = [serialize_task(task) for task in tasks]
+
+        return {
+            "count": len(result),
+            "tasks": result
+        }
+    finally:
+        db.close()
 
 
 @app.get("/tasks/search")
 def search_tasks(
     q: str = Query(default=""),
     priority: str = Query(default=""),
-    deadline: str = Query(default="")
+    deadline: str = Query(default=""),
+    authorization: str | None = Header(default=None)
 ):
     db = SessionLocal()
-    query = db.query(Task)
 
-    if q.strip():
-        query = query.filter(
-            or_(
-                Task.title.ilike(f"%{q}%"),
-                Task.deadline.ilike(f"%{q}%"),
-                Task.priority.ilike(f"%{q}%")
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        if q.strip():
+            query = query.filter(
+                or_(
+                    Task.title.ilike(f"%{q}%"),
+                    Task.deadline.ilike(f"%{q}%"),
+                    Task.priority.ilike(f"%{q}%")
+                )
             )
-        )
 
-    if priority.strip():
-        query = query.filter(Task.priority.ilike(priority.strip()))
+        if priority.strip():
+            query = query.filter(Task.priority.ilike(priority.strip()))
 
-    if deadline.strip():
-        query = query.filter(Task.deadline.ilike(f"%{deadline.strip()}%"))
+        if deadline.strip():
+            query = query.filter(Task.deadline.ilike(f"%{deadline.strip()}%"))
 
-    tasks = query.order_by(Task.id.desc()).all()
-    result = [serialize_task(task) for task in tasks]
-    db.close()
+        tasks = query.order_by(Task.id.desc()).all()
+        result = [serialize_task(task) for task in tasks]
 
-    return {
-        "count": len(result),
-        "tasks": result
-    }
+        return {
+            "count": len(result),
+            "tasks": result
+        }
+    finally:
+        db.close()
 
 
 @app.get("/tasks/{task_id}")
-def get_task(task_id: int):
+def get_task(task_id: int, authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
 
-    if not task:
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task).filter(Task.id == task_id)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        task = query.first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        return serialize_task(task)
+    finally:
         db.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    result = serialize_task(task)
-    db.close()
-    return result
 
 
 @app.delete("/tasks/{task_id}")
-def delete_task(task_id: int):
+def delete_task(task_id: int, authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
 
-    if not task:
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task).filter(Task.id == task_id)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        task = query.first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        db.delete(task)
+        db.commit()
+
+        return {"message": "Task deleted successfully"}
+    finally:
         db.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    db.delete(task)
-    db.commit()
-    db.close()
-
-    return {"message": "Task deleted successfully"}
 
 
 @app.put("/tasks/{task_id}")
-def update_task(task_id: int, request: UpdateTaskRequest):
+def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
 
-    if not task:
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task).filter(Task.id == task_id)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        task = query.first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        task.title = request.title
+        task.deadline = request.deadline
+        task.priority = request.priority
+
+        db.commit()
+        db.refresh(task)
+
+        return {
+            "message": "Task updated successfully",
+            "task": serialize_task(task)
+        }
+    finally:
         db.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    task.title = request.title
-    task.deadline = request.deadline
-    task.priority = request.priority
-
-    db.commit()
-    db.refresh(task)
-    result = serialize_task(task)
-    db.close()
-
-    return {
-        "message": "Task updated successfully",
-        "task": result
-    }
 
 
 @app.post("/tasks/{task_id}/ai-update")
-def ai_update_task(task_id: int, request: UpdateTaskAIRequest):
+def ai_update_task(task_id: int, request: UpdateTaskAIRequest, authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
 
-    if not task:
-        db.close()
-        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task).filter(Task.id == task_id)
 
-    prompt = f"""
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        task = query.first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        prompt = f"""
 You are an AI office assistant.
 
 You will update an existing task based on the user's instruction.
@@ -379,50 +456,55 @@ Required JSON format:
 }}
 """
 
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt
-    )
-
-    output_text = response.output_text.strip()
-
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError:
-        db.close()
-        raise HTTPException(
-            status_code=500,
-            detail="AI response was not valid JSON"
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt
         )
 
-    task.title = parsed.get("title", task.title)
-    task.deadline = parsed.get("deadline", task.deadline)
-    task.priority = parsed.get("priority", task.priority)
+        output_text = response.output_text.strip()
 
-    db.commit()
-    db.refresh(task)
+        try:
+            parsed = json.loads(output_text)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=500,
+                detail="AI response was not valid JSON"
+            )
 
-    result = {
-        "message": "Task updated successfully",
-        "task": serialize_task(task)
-    }
+        task.title = parsed.get("title", task.title)
+        task.deadline = parsed.get("deadline", task.deadline)
+        task.priority = parsed.get("priority", task.priority)
 
-    db.close()
-    return result
+        db.commit()
+        db.refresh(task)
+
+        return {
+            "message": "Task updated successfully",
+            "task": serialize_task(task)
+        }
+    finally:
+        db.close()
 
 
 @app.post("/tasks/ai-delete")
-def ai_delete_task(request: DeleteTaskAIRequest):
+def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Header(default=None)):
     db = SessionLocal()
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
 
-    if not tasks:
-        db.close()
-        raise HTTPException(status_code=404, detail="No tasks found")
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task)
 
-    task_list = [serialize_task(task) for task in tasks]
+        if user:
+            query = query.filter(Task.user_id == user.id)
 
-    prompt = f"""
+        tasks = query.order_by(Task.id.desc()).all()
+
+        if not tasks:
+            raise HTTPException(status_code=404, detail="No tasks found")
+
+        task_list = [serialize_task(task) for task in tasks]
+
+        prompt = f"""
 You are an AI office assistant.
 
 The user wants to delete one task from the task list.
@@ -445,56 +527,67 @@ Required JSON format:
 }}
 """
 
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt
-    )
-
-    output_text = response.output_text.strip()
-
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError:
-        db.close()
-        raise HTTPException(
-            status_code=500,
-            detail="AI response was not valid JSON"
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt
         )
 
-    task_id = parsed.get("task_id")
+        output_text = response.output_text.strip()
 
-    if not task_id:
+        try:
+            parsed = json.loads(output_text)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=500,
+                detail="AI response was not valid JSON"
+            )
+
+        task_id = parsed.get("task_id")
+
+        if not task_id:
+            raise HTTPException(status_code=400, detail="Task id was not returned by AI")
+
+        delete_query = db.query(Task).filter(Task.id == task_id)
+
+        if user:
+            delete_query = delete_query.filter(Task.user_id == user.id)
+
+        task = delete_query.first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        deleted_task = serialize_task(task)
+
+        db.delete(task)
+        db.commit()
+
+        return {
+            "message": "Task deleted successfully",
+            "deleted_task": deleted_task
+        }
+    finally:
         db.close()
-        raise HTTPException(status_code=400, detail="Task id was not returned by AI")
-
-    task = db.query(Task).filter(Task.id == task_id).first()
-
-    if not task:
-        db.close()
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    deleted_task = serialize_task(task)
-
-    db.delete(task)
-    db.commit()
-    db.close()
-
-    return {
-        "message": "Task deleted successfully",
-        "deleted_task": deleted_task
-    }
 
 
 @app.post("/assistant")
-def assistant(request: AssistantRequest):
+def assistant(request: AssistantRequest, authorization: str | None = Header(default=None)):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
 
     db = SessionLocal()
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
-    task_list = [serialize_task(task) for task in tasks]
 
-    prompt = f"""
+    try:
+        user = get_current_user_from_token(db, authorization)
+        query = db.query(Task)
+
+        if user:
+            query = query.filter(Task.user_id == user.id)
+
+        tasks = query.order_by(Task.id.desc()).all()
+        task_list = [serialize_task(task) for task in tasks]
+
+        prompt = f"""
 You are an AI office assistant.
 
 Your job is to detect one or more user intents and return ONLY valid JSON.
@@ -544,124 +637,129 @@ Required JSON format:
 }}
 """
 
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt
-    )
-
-    output_text = response.output_text.strip()
-
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError:
-        db.close()
-        raise HTTPException(
-            status_code=500,
-            detail="AI response was not valid JSON"
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt
         )
 
-    if isinstance(parsed, list):
-        actions = parsed
-    else:
-        actions = parsed.get("actions", [])
+        output_text = response.output_text.strip()
 
-    if not actions:
-        db.close()
-        raise HTTPException(status_code=400, detail="No actions returned by AI")
-
-    for item in actions:
-        if item.get("action") == "clarify":
-            db.close()
-            return {
-                "action": "clarify",
-                "message": item.get("clarify_message", "Please clarify your request."),
-                "actions": actions
-            }
-
-    results = []
-
-    for item in actions:
-        action = item.get("action")
-
-        if action == "create":
-            db_task = Task(
-                title=item.get("title", ""),
-                deadline=item.get("deadline", "Not specified"),
-                priority=item.get("priority", "medium")
-            )
-            db.add(db_task)
-            db.commit()
-            db.refresh(db_task)
-
-            results.append(
-                {
-                    "action": "create",
-                    "message": "Task created successfully",
-                    "task": serialize_task(db_task)
-                }
+        try:
+            parsed = json.loads(output_text)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=500,
+                detail="AI response was not valid JSON"
             )
 
-        elif action == "update":
-            task_id = item.get("task_id")
-            task = db.query(Task).filter(Task.id == task_id).first()
-
-            if not task:
-                db.close()
-                raise HTTPException(status_code=404, detail="Task not found")
-
-            task.title = item.get("title", task.title)
-            task.deadline = item.get("deadline", task.deadline)
-            task.priority = item.get("priority", task.priority)
-
-            db.commit()
-            db.refresh(task)
-
-            results.append(
-                {
-                    "action": "update",
-                    "message": "Task updated successfully",
-                    "task": serialize_task(task)
-                }
-            )
-
-        elif action == "delete":
-            task_id = item.get("task_id")
-            task = db.query(Task).filter(Task.id == task_id).first()
-
-            if not task:
-                db.close()
-                raise HTTPException(status_code=404, detail="Task not found")
-
-            deleted_task = serialize_task(task)
-
-            db.delete(task)
-            db.commit()
-
-            results.append(
-                {
-                    "action": "delete",
-                    "message": "Task deleted successfully",
-                    "task": deleted_task
-                }
-            )
-
+        if isinstance(parsed, list):
+            actions = parsed
         else:
-            db.close()
-            raise HTTPException(status_code=400, detail="Invalid action returned by AI")
+            actions = parsed.get("actions", [])
 
-    db.close()
+        if not actions:
+            raise HTTPException(status_code=400, detail="No actions returned by AI")
 
-    if len(results) == 1:
-        return results[0]
+        for item in actions:
+            if item.get("action") == "clarify":
+                return {
+                    "action": "clarify",
+                    "message": item.get("clarify_message", "Please clarify your request."),
+                    "actions": actions
+                }
 
-    return {
-        "message": "Multiple actions completed successfully",
-        "results": results
-    }
+        results = []
+
+        for item in actions:
+            action = item.get("action")
+
+            if action == "create":
+                db_task = Task(
+                    title=item.get("title", ""),
+                    deadline=item.get("deadline", "Not specified"),
+                    priority=item.get("priority", "medium"),
+                    user_id=user.id if user else None
+                )
+                db.add(db_task)
+                db.commit()
+                db.refresh(db_task)
+
+                results.append(
+                    {
+                        "action": "create",
+                        "message": "Task created successfully",
+                        "task": serialize_task(db_task)
+                    }
+                )
+
+            elif action == "update":
+                task_id = item.get("task_id")
+                update_query = db.query(Task).filter(Task.id == task_id)
+
+                if user:
+                    update_query = update_query.filter(Task.user_id == user.id)
+
+                task = update_query.first()
+
+                if not task:
+                    raise HTTPException(status_code=404, detail="Task not found")
+
+                task.title = item.get("title", task.title)
+                task.deadline = item.get("deadline", task.deadline)
+                task.priority = item.get("priority", task.priority)
+
+                db.commit()
+                db.refresh(task)
+
+                results.append(
+                    {
+                        "action": "update",
+                        "message": "Task updated successfully",
+                        "task": serialize_task(task)
+                    }
+                )
+
+            elif action == "delete":
+                task_id = item.get("task_id")
+                delete_query = db.query(Task).filter(Task.id == task_id)
+
+                if user:
+                    delete_query = delete_query.filter(Task.user_id == user.id)
+
+                task = delete_query.first()
+
+                if not task:
+                    raise HTTPException(status_code=404, detail="Task not found")
+
+                deleted_task = serialize_task(task)
+
+                db.delete(task)
+                db.commit()
+
+                results.append(
+                    {
+                        "action": "delete",
+                        "message": "Task deleted successfully",
+                        "task": deleted_task
+                    }
+                )
+
+            else:
+                raise HTTPException(status_code=400, detail="Invalid action returned by AI")
+
+        if len(results) == 1:
+            return results[0]
+
+        return {
+            "message": "Multiple actions completed successfully",
+            "results": results
+        }
+    finally:
+        db.close()
 
 
 @app.post("/analyze")
-def analyze(request: EmailRequest):
+def analyze(request: EmailRequest, authorization: str | None = Header(default=None)):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
 
@@ -703,24 +801,28 @@ Email:
         )
 
     db = SessionLocal()
-    saved_tasks = []
 
-    for task in parsed.get("tasks", []):
-        db_task = Task(
-            title=task.get("title", ""),
-            deadline=task.get("deadline", ""),
-            priority=task.get("priority", "")
-        )
-        db.add(db_task)
-        db.commit()
-        db.refresh(db_task)
+    try:
+        user = get_current_user_from_token(db, authorization)
+        saved_tasks = []
 
-        saved_tasks.append(serialize_task(db_task))
+        for task in parsed.get("tasks", []):
+            db_task = Task(
+                title=task.get("title", ""),
+                deadline=task.get("deadline", ""),
+                priority=task.get("priority", ""),
+                user_id=user.id if user else None
+            )
+            db.add(db_task)
+            db.commit()
+            db.refresh(db_task)
 
-    db.close()
+            saved_tasks.append(serialize_task(db_task))
 
-    return {
-        "original_text": request.text,
-        "summary": parsed.get("summary", ""),
-        "created_tasks": saved_tasks
-    }
+        return {
+            "original_text": request.text,
+            "summary": parsed.get("summary", ""),
+            "created_tasks": saved_tasks
+        }
+    finally:
+        db.close()
