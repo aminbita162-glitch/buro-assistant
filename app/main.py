@@ -225,10 +225,7 @@ def auth_me(authorization: str | None = Header(default=None)):
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-
-        if not user:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        user = require_current_user(db, authorization)
 
         return {
             "message": "Authenticated user",
@@ -243,13 +240,8 @@ def get_stats(authorization: str | None = Header(default=None)):
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        tasks = query.order_by(Task.id.desc()).all()
+        user = require_current_user(db, authorization)
+        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
 
         total = len(tasks)
         high_count = 0
@@ -284,13 +276,8 @@ def get_tasks(authorization: str | None = Header(default=None)):
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        tasks = query.order_by(Task.id.desc()).all()
+        user = require_current_user(db, authorization)
+        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
         result = [serialize_task(task) for task in tasks]
 
         return {
@@ -311,11 +298,8 @@ def search_tasks(
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
+        user = require_current_user(db, authorization)
+        query = db.query(Task).filter(Task.user_id == user.id)
 
         if q.strip():
             query = query.filter(
@@ -348,13 +332,8 @@ def get_task(task_id: int, authorization: str | None = Header(default=None)):
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task).filter(Task.id == task_id)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        task = query.first()
+        user = require_current_user(db, authorization)
+        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -369,13 +348,8 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task).filter(Task.id == task_id)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        task = query.first()
+        user = require_current_user(db, authorization)
+        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -393,13 +367,8 @@ def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | N
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task).filter(Task.id == task_id)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        task = query.first()
+        user = require_current_user(db, authorization)
+        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -424,13 +393,8 @@ def ai_update_task(task_id: int, request: UpdateTaskAIRequest, authorization: st
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task).filter(Task.id == task_id)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        task = query.first()
+        user = require_current_user(db, authorization)
+        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -491,13 +455,8 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        tasks = query.order_by(Task.id.desc()).all()
+        user = require_current_user(db, authorization)
+        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
 
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
@@ -547,12 +506,7 @@ Required JSON format:
         if not task_id:
             raise HTTPException(status_code=400, detail="Task id was not returned by AI")
 
-        delete_query = db.query(Task).filter(Task.id == task_id)
-
-        if user:
-            delete_query = delete_query.filter(Task.user_id == user.id)
-
-        task = delete_query.first()
+        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -578,13 +532,8 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
-        query = db.query(Task)
-
-        if user:
-            query = query.filter(Task.user_id == user.id)
-
-        tasks = query.order_by(Task.id.desc()).all()
+        user = require_current_user(db, authorization)
+        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
         task_list = [serialize_task(task) for task in tasks]
 
         prompt = f"""
@@ -678,7 +627,7 @@ Required JSON format:
                     title=item.get("title", ""),
                     deadline=item.get("deadline", "Not specified"),
                     priority=item.get("priority", "medium"),
-                    user_id=user.id if user else None
+                    user_id=user.id
                 )
                 db.add(db_task)
                 db.commit()
@@ -694,12 +643,7 @@ Required JSON format:
 
             elif action == "update":
                 task_id = item.get("task_id")
-                update_query = db.query(Task).filter(Task.id == task_id)
-
-                if user:
-                    update_query = update_query.filter(Task.user_id == user.id)
-
-                task = update_query.first()
+                task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
@@ -721,12 +665,7 @@ Required JSON format:
 
             elif action == "delete":
                 task_id = item.get("task_id")
-                delete_query = db.query(Task).filter(Task.id == task_id)
-
-                if user:
-                    delete_query = delete_query.filter(Task.user_id == user.id)
-
-                task = delete_query.first()
+                task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
@@ -803,7 +742,7 @@ Email:
     db = SessionLocal()
 
     try:
-        user = get_current_user_from_token(db, authorization)
+        user = require_current_user(db, authorization)
         saved_tasks = []
 
         for task in parsed.get("tasks", []):
@@ -811,7 +750,7 @@ Email:
                 title=task.get("title", ""),
                 deadline=task.get("deadline", ""),
                 priority=task.get("priority", ""),
-                user_id=user.id if user else None
+                user_id=user.id
             )
             db.add(db_task)
             db.commit()
