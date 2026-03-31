@@ -215,6 +215,12 @@
       border-color: #fca5a5;
     }
 
+    .status-warning {
+      background: #fef3c7;
+      color: #92400e;
+      border-color: #fcd34d;
+    }
+
     .message-box {
       padding: 14px 16px;
       border-radius: 12px;
@@ -714,6 +720,22 @@
       return JSON.stringify(data, null, 2);
     }
 
+    function getResponseType(data, fallbackType = "success") {
+      if (!data) {
+        return fallbackType;
+      }
+
+      if (data.action === "clarify") {
+        return "warning";
+      }
+
+      if (data.detail) {
+        return "error";
+      }
+
+      return fallbackType;
+    }
+
     async function parseResponse(res) {
       const contentType = res.headers.get("content-type") || "";
 
@@ -842,14 +864,60 @@
       }
     }
 
-    function logout() {
-      clearAuthData();
-      renderUserBox();
-      renderEmptyTasks("Please login to view your tasks.");
-      setOutput("Logged out successfully.");
-      showStatus("Logged out successfully.", "success");
-      notify("Logout", "Logged out successfully.", "success");
-      scrollToTopArea();
+    async function logout() {
+      const tokenBeforeLogout = getToken();
+
+      if (!tokenBeforeLogout) {
+        clearAuthData();
+        renderUserBox();
+        renderEmptyTasks("Please login to view your tasks.");
+        setOutput("Logged out successfully.");
+        showStatus("Logged out successfully.", "success");
+        notify("Logout", "Logged out successfully.", "success");
+        scrollToTopArea();
+        return;
+      }
+
+      try {
+        showStatus("Logging out...", "loading");
+        notify("Logout", "Logging out...", "info");
+        scrollToTopArea();
+
+        const res = await fetch(buildApiUrl("/auth/logout"), {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${tokenBeforeLogout}`
+          }
+        });
+
+        const data = await parseResponse(res);
+
+        clearAuthData();
+        renderUserBox();
+        renderEmptyTasks("Please login to view your tasks.");
+
+        if (!res.ok) {
+          const message = data.detail || "Logged out locally.";
+          setOutput(formatResponse(data));
+          showStatus("Logged out successfully.", "success");
+          notify("Logout", message, "warning");
+          scrollToTopArea();
+          return;
+        }
+
+        setOutput(formatResponse(data));
+        showStatus("Logged out successfully.", "success");
+        notify("Logout", "Logged out successfully.", "success");
+        scrollToTopArea();
+      } catch (error) {
+        clearAuthData();
+        renderUserBox();
+        renderEmptyTasks("Please login to view your tasks.");
+        setOutput("Logged out successfully.");
+        showStatus("Logged out successfully.", "success");
+        notify("Logout", "Logged out locally after network error.", "warning");
+        scrollToTopArea();
+      }
     }
 
     async function send() {
@@ -884,7 +952,10 @@
         });
 
         const data = await parseResponse(res);
-        setOutput(formatResponse(data));
+        const responseText = formatResponse(data);
+        const responseType = getResponseType(data, "success");
+
+        setOutput(responseText);
 
         if (res.status === 401) {
           handleUnauthorized();
@@ -900,8 +971,15 @@
           return;
         }
 
+        if (data.action === "clarify") {
+          showStatus("Clarification needed.", "warning");
+          notify("Task Clarification", responseText, "warning");
+          scrollToMessages();
+          return;
+        }
+
         showStatus("Task request completed successfully.", "success");
-        notify("Task Request Success", formatResponse(data), "success");
+        notify("Task Request Success", responseText, responseType);
         document.getElementById("input").value = "";
         await loadTasks();
         scrollToTopArea();
@@ -951,7 +1029,7 @@
         }
 
         showStatus("Task deleted successfully.", "success");
-        notify("Delete Success", `Task #${id} deleted successfully.`, "success");
+        notify("Delete Success", formatResponse(data), "success");
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
@@ -991,7 +1069,10 @@
         });
 
         const data = await parseResponse(res);
-        setOutput(formatResponse(data));
+        const responseText = formatResponse(data);
+        const responseType = getResponseType(data, "success");
+
+        setOutput(responseText);
 
         if (res.status === 401) {
           handleUnauthorized();
@@ -1007,8 +1088,15 @@
           return;
         }
 
+        if (data.action === "clarify") {
+          showStatus("Clarification needed.", "warning");
+          notify("Update Clarification", responseText, "warning");
+          scrollToMessages();
+          return;
+        }
+
         showStatus("Task updated successfully.", "success");
-        notify("Update Success", formatResponse(data), "success");
+        notify("Update Success", responseText, responseType);
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
@@ -1026,7 +1114,9 @@
       return "";
     }
 
-    async function loadTasks(params = null) {
+    async function loadTasks(params = null, options = {}) {
+      const silent = options.silent === true;
+
       if (!isLoggedIn()) {
         renderEmptyTasks("Please login to view your tasks.");
         return;
@@ -1057,7 +1147,9 @@
 
         if (!data.tasks || data.tasks.length === 0) {
           renderEmptyTasks("No tasks found.");
-          notify("Tasks", "No tasks found for this account.", "info");
+          if (!silent) {
+            notify("Tasks", "No tasks found for this account.", "info");
+          }
           return;
         }
 
@@ -1131,7 +1223,7 @@
       document.getElementById("searchDeadline").value = "";
       document.getElementById("searchPriority").value = "";
 
-      await loadTasks();
+      await loadTasks(null, { silent: true });
       showStatus("Filters cleared.", "success");
       notify("Filters", "Filters cleared successfully.", "success");
       scrollToTasks();
@@ -1140,7 +1232,7 @@
     renderUserBox();
     showMessage("System ready.", "info");
     addMessageLog("System", "Application loaded successfully.", "info");
-    loadTasks();
+    loadTasks(null, { silent: true });
   </script>
 </body>
 </html>
