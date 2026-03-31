@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from sqlalchemy import create_engine, Column, Integer, String, or_, text, inspect
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.exc import OperationalError
 
 app = FastAPI()
 
@@ -17,7 +18,13 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_timeout=30
+)
+
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
@@ -143,6 +150,12 @@ def require_current_user(db, authorization: str | None):
     return user
 
 
+def safe_db_error_message(error: Exception):
+    if isinstance(error, OperationalError):
+        return "Database connection failed. Please try again."
+    return "Internal server error"
+
+
 @app.get("/")
 def root():
     return FileResponse("index.html")
@@ -184,6 +197,10 @@ def signup(request: SignupRequest):
             "message": "User created successfully",
             "user": serialize_user(user)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -216,6 +233,10 @@ def login(request: LoginRequest):
             "token": token,
             "user": serialize_user(user)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -231,6 +252,10 @@ def auth_me(authorization: str | None = Header(default=None)):
             "message": "Authenticated user",
             "user": serialize_user(user)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -267,6 +292,10 @@ def get_stats(authorization: str | None = Header(default=None)):
             "low_priority_tasks": low_count,
             "recent_tasks": recent_tasks
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -284,6 +313,10 @@ def get_tasks(authorization: str | None = Header(default=None)):
             "count": len(result),
             "tasks": result
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -323,6 +356,10 @@ def search_tasks(
             "count": len(result),
             "tasks": result
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -339,6 +376,10 @@ def get_task(task_id: int, authorization: str | None = Header(default=None)):
             raise HTTPException(status_code=404, detail="Task not found")
 
         return serialize_task(task)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -358,6 +399,10 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
         db.commit()
 
         return {"message": "Task deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -384,6 +429,10 @@ def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | N
             "message": "Task updated successfully",
             "task": serialize_task(task)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -446,6 +495,10 @@ Required JSON format:
             "message": "Task updated successfully",
             "task": serialize_task(task)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -520,6 +573,10 @@ Required JSON format:
             "message": "Task deleted successfully",
             "deleted_task": deleted_task
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -693,6 +750,10 @@ Required JSON format:
             "message": "Multiple actions completed successfully",
             "results": results
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
 
@@ -763,5 +824,9 @@ Email:
             "summary": parsed.get("summary", ""),
             "created_tasks": saved_tasks
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
     finally:
         db.close()
