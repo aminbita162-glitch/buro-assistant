@@ -117,9 +117,11 @@
       border-radius: 12px;
       overflow-x: auto;
       min-height: 80px;
+      margin: 0;
     }
 
-    #tasks {
+    #tasks,
+    #messageList {
       list-style: none;
       padding: 0;
       margin: 0;
@@ -213,6 +215,86 @@
       border-color: #fca5a5;
     }
 
+    .message-box {
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      margin-bottom: 14px;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .message-info {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-color: #bfdbfe;
+    }
+
+    .message-success {
+      background: #dcfce7;
+      color: #166534;
+      border-color: #86efac;
+    }
+
+    .message-error {
+      background: #fee2e2;
+      color: #b91c1c;
+      border-color: #fca5a5;
+    }
+
+    .message-warning {
+      background: #fef3c7;
+      color: #92400e;
+      border-color: #fcd34d;
+    }
+
+    .message-empty {
+      padding: 16px;
+      border-radius: 12px;
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .message-item {
+      padding: 12px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      background: #f9fafb;
+      margin-bottom: 10px;
+    }
+
+    .message-item-header {
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .message-item-body {
+      font-size: 15px;
+      line-height: 1.5;
+      color: #374151;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message-item-info .message-item-header {
+      color: #1d4ed8;
+    }
+
+    .message-item-success .message-item-header {
+      color: #166534;
+    }
+
+    .message-item-error .message-item-header {
+      color: #b91c1c;
+    }
+
+    .message-item-warning .message-item-header {
+      color: #92400e;
+    }
+
     .empty-state {
       padding: 16px;
       border-radius: 12px;
@@ -253,6 +335,18 @@
       margin-top: 8px;
     }
 
+    .small-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 12px;
+    }
+
+    .small-btn {
+      font-size: 14px;
+      padding: 10px 12px;
+      min-width: auto;
+    }
+
     @media (max-width: 640px) {
       .container {
         padding: 14px;
@@ -277,6 +371,14 @@
       .auth-grid {
         grid-template-columns: 1fr;
       }
+
+      .small-actions {
+        justify-content: stretch;
+      }
+
+      .small-actions button {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -290,6 +392,15 @@
         <button onclick="send()">Send</button>
       </div>
       <div id="statusBox" class="status-box status-neutral">Ready</div>
+    </div>
+
+    <div class="card" id="messageCard">
+      <h2 class="section-title">Message Center</h2>
+      <div id="messageBox" class="message-box message-info">System ready.</div>
+      <div class="small-actions">
+        <button class="secondary-btn small-btn" onclick="clearMessages()">Clear Messages</button>
+      </div>
+      <ul id="messageList"></ul>
     </div>
 
     <div class="card">
@@ -325,7 +436,7 @@
 
     <div class="card" id="responseCard">
       <h2 class="section-title">Response</h2>
-      <pre id="output"></pre>
+      <pre id="output">No response yet.</pre>
     </div>
 
     <div class="card">
@@ -353,6 +464,7 @@
 
   <script>
     const API_BASE = "https://buro-assistant.onrender.com";
+    const MAX_MESSAGES = 8;
 
     function buildApiUrl(path, params = null) {
       const url = new URL(path, API_BASE);
@@ -414,6 +526,10 @@
       return headers;
     }
 
+    function setOutput(text) {
+      document.getElementById("output").innerText = text || "No response yet.";
+    }
+
     function showStatus(message, type) {
       const box = document.getElementById("statusBox");
       box.className = "status-box";
@@ -425,6 +541,48 @@
       const box = document.getElementById("statusBox");
       box.className = "status-box status-neutral";
       box.innerText = "Ready";
+    }
+
+    function showMessage(message, type = "info") {
+      const box = document.getElementById("messageBox");
+      box.className = "message-box";
+      box.classList.add(`message-${type}`);
+      box.innerText = message;
+    }
+
+    function addMessageLog(title, message, type = "info") {
+      const list = document.getElementById("messageList");
+
+      const item = document.createElement("li");
+      item.className = `message-item message-item-${type}`;
+
+      const header = document.createElement("div");
+      header.className = "message-item-header";
+      header.innerText = title;
+
+      const body = document.createElement("div");
+      body.className = "message-item-body";
+      body.innerText = message;
+
+      item.appendChild(header);
+      item.appendChild(body);
+
+      list.prepend(item);
+
+      while (list.children.length > MAX_MESSAGES) {
+        list.removeChild(list.lastChild);
+      }
+    }
+
+    function clearMessages() {
+      document.getElementById("messageList").innerHTML = "";
+      showMessage("Message history cleared.", "info");
+      addMessageLog("Info", "Message history cleared.", "info");
+    }
+
+    function notify(title, message, type = "info") {
+      showMessage(message, type);
+      addMessageLog(title, message, type);
     }
 
     function scrollToTopArea() {
@@ -445,6 +603,13 @@
       const tasksCard = document.getElementById("tasksCard");
       if (tasksCard) {
         tasksCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    function scrollToMessages() {
+      const messageCard = document.getElementById("messageCard");
+      if (messageCard) {
+        messageCard.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
 
@@ -476,8 +641,9 @@
       clearAuthData();
       renderUserBox();
       renderEmptyTasks("Please login to view your tasks.");
-      document.getElementById("output").innerText = message;
+      setOutput(message);
       showStatus(message, "error");
+      notify("Unauthorized", message, "error");
     }
 
     function formatTaskLine(task) {
@@ -548,19 +714,41 @@
       return JSON.stringify(data, null, 2);
     }
 
+    async function parseResponse(res) {
+      const contentType = res.headers.get("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        try {
+          return await res.json();
+        } catch (error) {
+          return { detail: "Invalid JSON response from server." };
+        }
+      }
+
+      try {
+        const text = await res.text();
+        return { detail: text || "Unknown server response." };
+      } catch (error) {
+        return { detail: "Unable to read server response." };
+      }
+    }
+
     async function signup() {
       const name = document.getElementById("signupName").value.trim();
       const email = document.getElementById("signupEmail").value.trim();
       const password = document.getElementById("signupPassword").value.trim();
 
       if (!name || !email || !password) {
-        showStatus("Please complete all signup fields.", "error");
+        const message = "Please complete all signup fields.";
+        showStatus(message, "error");
+        notify("Signup Error", message, "error");
         scrollToTopArea();
         return;
       }
 
       try {
         showStatus("Creating account...", "loading");
+        notify("Signup", "Creating account...", "info");
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl("/auth/signup"), {
@@ -569,16 +757,21 @@
           body: JSON.stringify({ name, email, password })
         });
 
-        const data = await res.json();
-        document.getElementById("output").innerText = formatResponse(data);
+        const data = await parseResponse(res);
+        setOutput(formatResponse(data));
 
         if (!res.ok) {
-          showStatus(data.detail || "Signup failed.", "error");
-          scrollToResponse();
+          const message = data.detail || "Signup failed.";
+          showStatus(message, "error");
+          notify("Signup Failed", message, "error");
+          scrollToMessages();
           return;
         }
 
-        showStatus("Account created successfully.", "success");
+        const message = "Account created successfully.";
+        showStatus(message, "success");
+        notify("Signup Success", `${message}\n${email}`, "success");
+
         document.getElementById("signupName").value = "";
         document.getElementById("signupEmail").value = "";
         document.getElementById("signupPassword").value = "";
@@ -588,9 +781,10 @@
 
         scrollToTopArea();
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Network or server error during signup.", "error");
-        scrollToResponse();
+        notify("Signup Error", "Network or server error during signup.", "error");
+        scrollToMessages();
       }
     }
 
@@ -599,13 +793,16 @@
       const password = document.getElementById("loginPassword").value.trim();
 
       if (!email || !password) {
-        showStatus("Please enter email and password.", "error");
+        const message = "Please enter email and password.";
+        showStatus(message, "error");
+        notify("Login Error", message, "error");
         scrollToTopArea();
         return;
       }
 
       try {
         showStatus("Logging in...", "loading");
+        notify("Login", "Logging in...", "info");
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl("/auth/login"), {
@@ -616,25 +813,32 @@
           body: JSON.stringify({ email, password })
         });
 
-        const data = await res.json();
-        document.getElementById("output").innerText = formatResponse(data);
+        const data = await parseResponse(res);
+        setOutput(formatResponse(data));
 
         if (!res.ok) {
-          showStatus(data.detail || "Login failed.", "error");
-          scrollToResponse();
+          const message = data.detail || "Login failed.";
+          showStatus(message, "error");
+          notify("Login Failed", message, "error");
+          scrollToMessages();
           return;
         }
 
         setAuthData(data.token, data.user);
         renderUserBox();
-        showStatus("Login successful.", "success");
+
+        const message = "Login successful.";
+        showStatus(message, "success");
+        notify("Login Success", `Logged in as ${data.user.name} (${data.user.email})`, "success");
+
         document.getElementById("loginPassword").value = "";
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Network or server error during login.", "error");
-        scrollToResponse();
+        notify("Login Error", "Network or server error during login.", "error");
+        scrollToMessages();
       }
     }
 
@@ -642,8 +846,9 @@
       clearAuthData();
       renderUserBox();
       renderEmptyTasks("Please login to view your tasks.");
-      document.getElementById("output").innerText = "Logged out successfully.";
+      setOutput("Logged out successfully.");
       showStatus("Logged out successfully.", "success");
+      notify("Logout", "Logged out successfully.", "success");
       scrollToTopArea();
     }
 
@@ -651,20 +856,25 @@
       const text = document.getElementById("input").value.trim();
 
       if (!isLoggedIn()) {
+        const message = "Unauthorized. Please login first.";
         showStatus("Please login first.", "error");
-        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        setOutput(message);
+        notify("Task Request Error", message, "error");
         scrollToTopArea();
         return;
       }
 
       if (!text) {
-        showStatus("Please enter a task instruction.", "error");
+        const message = "Please enter a task instruction.";
+        showStatus(message, "error");
+        notify("Task Request Error", message, "error");
         scrollToTopArea();
         return;
       }
 
       try {
         showStatus("Sending request...", "loading");
+        notify("Task Request", "Sending task request...", "info");
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl("/assistant"), {
@@ -673,42 +883,49 @@
           body: JSON.stringify({ text })
         });
 
-        const data = await res.json();
-        document.getElementById("output").innerText = formatResponse(data);
+        const data = await parseResponse(res);
+        setOutput(formatResponse(data));
 
         if (res.status === 401) {
           handleUnauthorized();
-          scrollToResponse();
+          scrollToMessages();
           return;
         }
 
         if (!res.ok) {
-          showStatus(data.detail || "Request failed.", "error");
-          scrollToResponse();
+          const message = data.detail || "Request failed.";
+          showStatus(message, "error");
+          notify("Task Request Failed", message, "error");
+          scrollToMessages();
           return;
         }
 
         showStatus("Task request completed successfully.", "success");
+        notify("Task Request Success", formatResponse(data), "success");
         document.getElementById("input").value = "";
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Network or server error.", "error");
-        scrollToResponse();
+        notify("Task Request Error", "Network or server error.", "error");
+        scrollToMessages();
       }
     }
 
     async function deleteTask(id) {
       if (!isLoggedIn()) {
+        const message = "Unauthorized. Please login first.";
         showStatus("Please login first.", "error");
-        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        setOutput(message);
+        notify("Delete Error", message, "error");
         scrollToTopArea();
         return;
       }
 
       try {
         showStatus("Deleting task...", "loading");
+        notify("Delete", `Deleting task #${id}...`, "warning");
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl(`/tasks/${id}`), {
@@ -716,35 +933,41 @@
           headers: buildHeaders()
         });
 
-        const data = await res.json();
-        document.getElementById("output").innerText = formatResponse(data);
+        const data = await parseResponse(res);
+        setOutput(formatResponse(data));
 
         if (res.status === 401) {
           handleUnauthorized();
-          scrollToResponse();
+          scrollToMessages();
           return;
         }
 
         if (!res.ok) {
-          showStatus(data.detail || "Delete failed.", "error");
-          scrollToResponse();
+          const message = data.detail || "Delete failed.";
+          showStatus(message, "error");
+          notify("Delete Failed", message, "error");
+          scrollToMessages();
           return;
         }
 
         showStatus("Task deleted successfully.", "success");
+        notify("Delete Success", `Task #${id} deleted successfully.`, "success");
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Network or server error while deleting.", "error");
-        scrollToResponse();
+        notify("Delete Error", "Network or server error while deleting.", "error");
+        scrollToMessages();
       }
     }
 
     async function editTask(id) {
       if (!isLoggedIn()) {
+        const message = "Unauthorized. Please login first.";
         showStatus("Please login first.", "error");
-        document.getElementById("output").innerText = "Unauthorized. Please login first.";
+        setOutput(message);
+        notify("Update Error", message, "error");
         scrollToTopArea();
         return;
       }
@@ -752,11 +975,13 @@
       const text = prompt("Enter update instruction for this task:");
 
       if (!text) {
+        notify("Update Cancelled", `Update for task #${id} was cancelled.`, "info");
         return;
       }
 
       try {
         showStatus("Updating task...", "loading");
+        notify("Update", `Updating task #${id}...`, "warning");
         scrollToTopArea();
 
         const res = await fetch(buildApiUrl(`/tasks/${id}/ai-update`), {
@@ -765,28 +990,32 @@
           body: JSON.stringify({ text })
         });
 
-        const data = await res.json();
-        document.getElementById("output").innerText = formatResponse(data);
+        const data = await parseResponse(res);
+        setOutput(formatResponse(data));
 
         if (res.status === 401) {
           handleUnauthorized();
-          scrollToResponse();
+          scrollToMessages();
           return;
         }
 
         if (!res.ok) {
-          showStatus(data.detail || "Update failed.", "error");
-          scrollToResponse();
+          const message = data.detail || "Update failed.";
+          showStatus(message, "error");
+          notify("Update Failed", message, "error");
+          scrollToMessages();
           return;
         }
 
         showStatus("Task updated successfully.", "success");
+        notify("Update Success", formatResponse(data), "success");
         await loadTasks();
         scrollToTopArea();
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Network or server error while updating.", "error");
-        scrollToResponse();
+        notify("Update Error", "Network or server error while updating.", "error");
+        scrollToMessages();
       }
     }
 
@@ -808,10 +1037,18 @@
           headers: buildHeaders()
         });
 
-        const data = await res.json();
+        const data = await parseResponse(res);
 
         if (res.status === 401) {
           handleUnauthorized();
+          return;
+        }
+
+        if (!res.ok) {
+          const message = data.detail || "Failed to load tasks.";
+          setOutput(formatResponse(data));
+          showStatus(message, "error");
+          notify("Load Tasks Failed", message, "error");
           return;
         }
 
@@ -820,6 +1057,7 @@
 
         if (!data.tasks || data.tasks.length === 0) {
           renderEmptyTasks("No tasks found.");
+          notify("Tasks", "No tasks found for this account.", "info");
           return;
         }
 
@@ -859,16 +1097,19 @@
           list.appendChild(li);
         });
       } catch (error) {
-        document.getElementById("output").innerText = String(error);
+        setOutput(String(error));
         showStatus("Failed to load tasks.", "error");
-        scrollToResponse();
+        notify("Load Tasks Error", "Failed to load tasks.", "error");
+        scrollToMessages();
       }
     }
 
     async function applyFilters() {
       if (!isLoggedIn()) {
-        showStatus("Please login first.", "error");
+        const message = "Please login first.";
+        showStatus(message, "error");
         renderEmptyTasks("Please login to view your tasks.");
+        notify("Filter Error", message, "error");
         scrollToTasks();
         return;
       }
@@ -881,6 +1122,7 @@
 
       await loadTasks(params);
       showStatus("Filters applied.", "success");
+      notify("Filters", "Filters applied successfully.", "success");
       scrollToTasks();
     }
 
@@ -891,10 +1133,13 @@
 
       await loadTasks();
       showStatus("Filters cleared.", "success");
+      notify("Filters", "Filters cleared successfully.", "success");
       scrollToTasks();
     }
 
     renderUserBox();
+    showMessage("System ready.", "info");
+    addMessageLog("System", "Application loaded successfully.", "info");
     loadTasks();
   </script>
 </body>
