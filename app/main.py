@@ -28,8 +28,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
-auth_tokens = {}
-
 
 class User(Base):
     __tablename__ = "users"
@@ -38,6 +36,7 @@ class User(Base):
     name = Column(String)
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
+    token = Column(String, nullable=True, index=True)
 
 
 class Task(Base):
@@ -62,7 +61,17 @@ def ensure_tasks_user_id_column():
             connection.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
 
 
+def ensure_users_token_column():
+    inspector = inspect(engine)
+    columns = [column["name"] for column in inspector.get_columns("users")]
+
+    if "token" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN token VARCHAR"))
+
+
 ensure_tasks_user_id_column()
+ensure_users_token_column()
 
 
 class EmailRequest(BaseModel):
@@ -132,12 +141,11 @@ def get_current_user_from_token(db, authorization: str | None):
         return None
 
     token = authorization.replace("Bearer ", "").strip()
-    user_id = auth_tokens.get(token)
 
-    if not user_id:
+    if not token:
         return None
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.token == token).first()
     return user
 
 
@@ -186,7 +194,8 @@ def signup(request: SignupRequest):
         user = User(
             name=name,
             email=email,
-            password_hash=hash_password(password)
+            password_hash=hash_password(password),
+            token=None
         )
 
         db.add(user)
@@ -226,13 +235,33 @@ def login(request: LoginRequest):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         token = secrets.token_hex(24)
-        auth_tokens[token] = user.id
+        user.token = token
+        db.commit()
+        db.refresh(user)
 
         return {
             "message": "Login successful",
             "token": token,
             "user": serialize_user(user)
         }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
+    finally:
+        db.close()
+
+
+@app.post("/auth/logout")
+def logout(authorization: str | None = Header(default=None)):
+    db = SessionLocal()
+
+    try:
+        user = require_current_user(db, authorization)
+        user.token = None
+        db.commit()
+
+        return {"message": "Logged out successfully"}
     except HTTPException:
         raise
     except Exception as error:
