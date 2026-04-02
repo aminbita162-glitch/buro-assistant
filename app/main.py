@@ -637,70 +637,25 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
 
-        task_list = [serialize_task(task) for task in tasks]
         fallback_task = find_best_task_match(tasks, request.text)
 
-        prompt = f"""
-You are an AI office assistant.
-
-The user wants to delete one task from the task list.
-Return ONLY valid JSON.
-Do not include markdown, code fences, or extra text.
-
-Task list:
-{json.dumps(task_list)}
-
-User instruction:
-{request.text}
-
-Rules:
-- Choose exactly one best matching task_id.
-- Prefer exact title match first.
-- If exact match does not exist, allow partial title match.
-- If the user says only part of a title such as "milk", match it to a task title containing that word if there is only one clear best match.
-- Use clarify only if multiple tasks are similarly matched or there is not enough information.
-- Return only one task_id when one clear best match exists.
-
-Required JSON format:
-{{
-  "task_id": 123
-}}
-"""
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
-        output_text = response.output_text.strip()
-
-        try:
-            parsed = json.loads(output_text)
-        except json.JSONDecodeError:
-            parsed = {}
-
-        task_id = parsed.get("task_id")
-
-        task = None
-
-        if task_id:
-            task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
-
-        if not task and fallback_task:
+        if fallback_task:
             task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
 
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
 
-        deleted_task = serialize_task(task)
+            deleted_task = serialize_task(task)
 
-        db.delete(task)
-        db.commit()
+            db.delete(task)
+            db.commit()
 
-        return {
-            "message": "Task deleted successfully",
-            "deleted_task": deleted_task
-        }
+            return {
+                "message": "Task deleted successfully",
+                "deleted_task": deleted_task
+            }
+
+        raise HTTPException(status_code=404, detail="Task not found")
     except HTTPException:
         raise
     except Exception as error:
@@ -853,13 +808,12 @@ Required JSON format:
                 )
 
             elif action == "delete":
-                task_id = item.get("task_id")
-                task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+                fallback_task = find_best_task_match(tasks, request.text)
 
-                if not task:
-                    fallback_task = find_best_task_match(tasks, request.text)
-                    if fallback_task:
-                        task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
+                if not fallback_task:
+                    raise HTTPException(status_code=404, detail="Task not found")
+
+                task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
