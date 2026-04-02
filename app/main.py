@@ -811,7 +811,7 @@ Required JSON format:
                 fallback_task = find_best_task_match(tasks, request.text)
 
                 if not fallback_task:
-                    raise HTTPException(status_code=404, detail="Task not found")
+                    raise HTTPException(status_code=400, detail="Please specify which task you want to delete")
 
                 task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
 
