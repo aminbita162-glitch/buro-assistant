@@ -2,6 +2,7 @@ import json
 import os
 import hashlib
 import secrets
+import re
 
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.responses import FileResponse
@@ -162,6 +163,99 @@ def safe_db_error_message(error: Exception):
     if isinstance(error, OperationalError):
         return "Database connection failed. Please try again."
     return "Internal server error"
+
+
+def normalize_text_for_match(value: str):
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def extract_delete_search_text(text: str):
+    normalized = normalize_text_for_match(text)
+    prefixes = [
+        "delete ",
+        "remove ",
+        "erase ",
+        "drop ",
+        "cancel "
+    ]
+
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            candidate = normalized[len(prefix):].strip()
+            if candidate:
+                return candidate
+
+    return normalized
+
+
+def find_best_task_match(tasks, user_text: str):
+    search_text = extract_delete_search_text(user_text)
+
+    if not search_text:
+        return None
+
+    normalized_search = normalize_text_for_match(search_text)
+    search_words = [word for word in normalized_search.split(" ") if word]
+
+    if not search_words:
+        return None
+
+    scored = []
+
+    for task in tasks:
+        title = normalize_text_for_match(task.title)
+        deadline = normalize_text_for_match(task.deadline)
+        priority = normalize_text_for_match(task.priority)
+
+        score = 0
+
+        if normalized_search == title:
+            score += 1000
+
+        if normalized_search in title:
+            score += 500
+
+        if normalized_search == deadline:
+            score += 250
+
+        if normalized_search in deadline:
+            score += 100
+
+        if normalized_search == priority:
+            score += 100
+
+        if normalized_search in priority:
+            score += 50
+
+        matched_words = 0
+        for word in search_words:
+            if word in title:
+                score += 40
+                matched_words += 1
+            elif word in deadline:
+                score += 15
+                matched_words += 1
+            elif word in priority:
+                score += 10
+                matched_words += 1
+
+        if matched_words == len(search_words):
+            score += 200
+
+        if score > 0:
+            scored.append((score, task.id, task))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    top_score = scored[0][0]
+    top_items = [item for item in scored if item[0] == top_score]
+
+    if len(top_items) > 1:
+        return None
+
+    return scored[0][2]
 
 
 @app.get("/")
@@ -544,6 +638,7 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
             raise HTTPException(status_code=404, detail="No tasks found")
 
         task_list = [serialize_task(task) for task in tasks]
+        fallback_task = find_best_task_match(tasks, request.text)
 
         prompt = f"""
 You are an AI office assistant.
@@ -560,7 +655,11 @@ User instruction:
 
 Rules:
 - Choose exactly one best matching task_id.
-- Return only one task_id.
+- Prefer exact title match first.
+- If exact match does not exist, allow partial title match.
+- If the user says only part of a title such as "milk", match it to a task title containing that word if there is only one clear best match.
+- Use clarify only if multiple tasks are similarly matched or there is not enough information.
+- Return only one task_id when one clear best match exists.
 
 Required JSON format:
 {{
@@ -578,17 +677,17 @@ Required JSON format:
         try:
             parsed = json.loads(output_text)
         except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=500,
-                detail="AI response was not valid JSON"
-            )
+            parsed = {}
 
         task_id = parsed.get("task_id")
 
-        if not task_id:
-            raise HTTPException(status_code=400, detail="Task id was not returned by AI")
+        task = None
 
-        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+        if task_id:
+            task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+
+        if not task and fallback_task:
+            task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
 
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -647,6 +746,10 @@ Rules:
 - Use update only when the user clearly refers to one existing task and wants it changed.
 - Use delete only when the user clearly refers to one existing task and wants it removed.
 - For update and delete, choose exactly one best matching task_id.
+- Prefer exact title match first.
+- If exact match does not exist, allow partial title match.
+- If the user refers to only one distinctive word from the title such as "milk", use the matching task when there is only one clear best match.
+- Only use clarify for delete when multiple tasks could match or no clear best match exists.
 - Do not update multiple similar tasks at once.
 - For create, set task_id to null and return title, deadline, and priority.
 - For update, return the correct task_id and the updated title, deadline, and priority.
@@ -752,6 +855,11 @@ Required JSON format:
             elif action == "delete":
                 task_id = item.get("task_id")
                 task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+
+                if not task:
+                    fallback_task = find_best_task_match(tasks, request.text)
+                    if fallback_task:
+                        task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
