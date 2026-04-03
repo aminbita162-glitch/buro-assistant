@@ -260,7 +260,9 @@ def find_best_task_match(tasks, user_text: str):
 
 @app.get("/")
 def root():
-    return FileResponse("index.html")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_path = os.path.join(base_dir, "index.html")
+    return FileResponse(file_path)
 
 
 @app.get("/health")
