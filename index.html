@@ -121,7 +121,8 @@
     }
 
     #tasks,
-    #messageList {
+    #messageList,
+    #recentTasksList {
       list-style: none;
       padding: 0;
       margin: 0;
@@ -353,6 +354,75 @@
       min-width: auto;
     }
 
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      background: #f9fafb;
+      padding: 16px;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: bold;
+      line-height: 1.1;
+    }
+
+    .stat-total .stat-value {
+      color: #1f2937;
+    }
+
+    .stat-high .stat-value {
+      color: #b91c1c;
+    }
+
+    .stat-medium .stat-value {
+      color: #92400e;
+    }
+
+    .stat-low .stat-value {
+      color: #166534;
+    }
+
+    .dashboard-subtitle {
+      font-size: 16px;
+      font-weight: bold;
+      margin-top: 6px;
+      margin-bottom: 12px;
+    }
+
+    .recent-task-item {
+      padding: 12px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      background: #f9fafb;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .recent-task-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 900px) {
+      .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
     @media (max-width: 640px) {
       .container {
         padding: 14px;
@@ -385,6 +455,10 @@
       .small-actions button {
         width: 100%;
       }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -398,6 +472,31 @@
         <button onclick="send()">Send</button>
       </div>
       <div id="statusBox" class="status-box status-neutral">Ready</div>
+    </div>
+
+    <div class="card" id="dashboardCard">
+      <h2 class="section-title">Dashboard</h2>
+      <div class="dashboard-grid">
+        <div class="stat-card stat-total">
+          <div class="stat-label">Total Tasks</div>
+          <div class="stat-value" id="statTotal">0</div>
+        </div>
+        <div class="stat-card stat-high">
+          <div class="stat-label">High Priority</div>
+          <div class="stat-value" id="statHigh">0</div>
+        </div>
+        <div class="stat-card stat-medium">
+          <div class="stat-label">Medium Priority</div>
+          <div class="stat-value" id="statMedium">0</div>
+        </div>
+        <div class="stat-card stat-low">
+          <div class="stat-label">Low Priority</div>
+          <div class="stat-value" id="statLow">0</div>
+        </div>
+      </div>
+
+      <div class="dashboard-subtitle">Recent Tasks</div>
+      <ul id="recentTasksList"></ul>
     </div>
 
     <div class="card" id="messageCard">
@@ -643,10 +742,62 @@
       list.appendChild(empty);
     }
 
+    function renderEmptyStats(message) {
+      document.getElementById("statTotal").innerText = "0";
+      document.getElementById("statHigh").innerText = "0";
+      document.getElementById("statMedium").innerText = "0";
+      document.getElementById("statLow").innerText = "0";
+
+      const list = document.getElementById("recentTasksList");
+      list.innerHTML = "";
+
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.innerText = message;
+      list.appendChild(empty);
+    }
+
+    function renderStats(data) {
+      document.getElementById("statTotal").innerText = String(data.total_tasks || 0);
+      document.getElementById("statHigh").innerText = String(data.high_priority_tasks || 0);
+      document.getElementById("statMedium").innerText = String(data.medium_priority_tasks || 0);
+      document.getElementById("statLow").innerText = String(data.low_priority_tasks || 0);
+
+      const list = document.getElementById("recentTasksList");
+      list.innerHTML = "";
+
+      const recentTasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];
+
+      if (recentTasks.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.innerText = "No recent tasks yet.";
+        list.appendChild(empty);
+        return;
+      }
+
+      recentTasks.forEach(task => {
+        const item = document.createElement("li");
+        item.className = "recent-task-item";
+
+        const title = document.createElement("div");
+        title.className = "recent-task-title";
+        title.innerText = `#${task.id} - ${task.title}`;
+
+        const details = document.createElement("div");
+        details.innerText = `Deadline: ${task.deadline} | Priority: ${task.priority}`;
+
+        item.appendChild(title);
+        item.appendChild(details);
+        list.appendChild(item);
+      });
+    }
+
     function handleUnauthorized(message = "Your session has expired. Please login again.") {
       clearAuthData();
       renderUserBox();
       renderEmptyTasks("Please login to view your tasks.");
+      renderEmptyStats("Please login to view your dashboard.");
       setOutput(message);
       showStatus(message, "error");
       notify("Unauthorized", message, "error");
@@ -854,7 +1005,8 @@
         notify("Login Success", `Logged in as ${data.user.name} (${data.user.email})`, "success");
 
         document.getElementById("loginPassword").value = "";
-        await loadTasks();
+        await loadStats({ silent: true });
+        await loadTasks({ silent: true });
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -871,6 +1023,7 @@
         clearAuthData();
         renderUserBox();
         renderEmptyTasks("Please login to view your tasks.");
+        renderEmptyStats("Please login to view your dashboard.");
         setOutput("Logged out successfully.");
         showStatus("Logged out successfully.", "success");
         notify("Logout", "Logged out successfully.", "success");
@@ -895,6 +1048,7 @@
         clearAuthData();
         renderUserBox();
         renderEmptyTasks("Please login to view your tasks.");
+        renderEmptyStats("Please login to view your dashboard.");
 
         if (!res.ok) {
           const message = data.detail || "Logged out locally.";
@@ -913,6 +1067,7 @@
         clearAuthData();
         renderUserBox();
         renderEmptyTasks("Please login to view your tasks.");
+        renderEmptyStats("Please login to view your dashboard.");
         setOutput("Logged out successfully.");
         showStatus("Logged out successfully.", "success");
         notify("Logout", "Logged out locally after network error.", "warning");
@@ -974,6 +1129,8 @@
         if (data.action === "clarify") {
           showStatus("Clarification needed.", "warning");
           notify("Task Clarification", responseText, "warning");
+          await loadStats({ silent: true });
+          await loadTasks({ silent: true });
           scrollToMessages();
           return;
         }
@@ -981,7 +1138,8 @@
         showStatus("Task request completed successfully.", "success");
         notify("Task Request Success", responseText, responseType);
         document.getElementById("input").value = "";
-        await loadTasks();
+        await loadStats({ silent: true });
+        await loadTasks({ silent: true });
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1030,7 +1188,8 @@
 
         showStatus("Task deleted successfully.", "success");
         notify("Delete Success", formatResponse(data), "success");
-        await loadTasks();
+        await loadStats({ silent: true });
+        await loadTasks({ silent: true });
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1091,13 +1250,16 @@
         if (data.action === "clarify") {
           showStatus("Clarification needed.", "warning");
           notify("Update Clarification", responseText, "warning");
+          await loadStats({ silent: true });
+          await loadTasks({ silent: true });
           scrollToMessages();
           return;
         }
 
         showStatus("Task updated successfully.", "success");
         notify("Update Success", responseText, responseType);
-        await loadTasks();
+        await loadStats({ silent: true });
+        await loadTasks({ silent: true });
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1114,8 +1276,49 @@
       return "";
     }
 
-    async function loadTasks(params = null, options = {}) {
+    async function loadStats(options = {}) {
       const silent = options.silent === true;
+
+      if (!isLoggedIn()) {
+        renderEmptyStats("Please login to view your dashboard.");
+        return;
+      }
+
+      try {
+        const res = await fetch(buildApiUrl("/stats"), {
+          headers: buildHeaders()
+        });
+
+        const data = await parseResponse(res);
+
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+
+        if (!res.ok) {
+          renderEmptyStats("Unable to load dashboard.");
+          if (!silent) {
+            const message = data.detail || "Failed to load dashboard.";
+            showStatus(message, "error");
+            notify("Dashboard Failed", message, "error");
+          }
+          return;
+        }
+
+        renderStats(data);
+      } catch (error) {
+        renderEmptyStats("Unable to load dashboard.");
+        if (!silent) {
+          showStatus("Failed to load dashboard.", "error");
+          notify("Dashboard Error", "Failed to load dashboard.", "error");
+        }
+      }
+    }
+
+    async function loadTasks(options = {}) {
+      const silent = options.silent === true;
+      const params = options.params || null;
 
       if (!isLoggedIn()) {
         renderEmptyTasks("Please login to view your tasks.");
@@ -1212,7 +1415,7 @@
         priority: document.getElementById("searchPriority").value
       };
 
-      await loadTasks(params);
+      await loadTasks({ params });
       showStatus("Filters applied.", "success");
       notify("Filters", "Filters applied successfully.", "success");
       scrollToTasks();
@@ -1223,7 +1426,7 @@
       document.getElementById("searchDeadline").value = "";
       document.getElementById("searchPriority").value = "";
 
-      await loadTasks(null, { silent: true });
+      await loadTasks({ silent: true });
       showStatus("Filters cleared.", "success");
       notify("Filters", "Filters cleared successfully.", "success");
       scrollToTasks();
@@ -1232,7 +1435,8 @@
     renderUserBox();
     showMessage("System ready.", "info");
     addMessageLog("System", "Application loaded successfully.", "info");
-    loadTasks(null, { silent: true });
+    renderEmptyStats("Please login to view your dashboard.");
+    loadTasks({ silent: true });
   </script>
 </body>
 </html>
