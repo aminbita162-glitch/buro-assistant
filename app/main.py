@@ -294,11 +294,60 @@ def is_show_tasks_request(text: str):
     return False
 
 
+def detect_tasks_query_request(text: str):
+    normalized = normalize_text_for_match(text)
+
+    if not normalized:
+        return None
+
+    trigger_words = ["show", "list", "display"]
+    has_task_word = "task" in normalized
+    has_query_trigger = any(word in normalized for word in trigger_words)
+
+    if not has_task_word and normalized not in {"my tasks", "all tasks"}:
+        return None
+
+    if not has_query_trigger and normalized not in {"my tasks", "all tasks"}:
+        return None
+
+    priority = None
+
+    if "high priority" in normalized or normalized == "high tasks" or normalized == "high priority tasks":
+        priority = "high"
+    elif "medium priority" in normalized or normalized == "medium tasks" or normalized == "medium priority tasks":
+        priority = "medium"
+    elif "low priority" in normalized or normalized == "low tasks" or normalized == "low priority tasks":
+        priority = "low"
+
+    return {
+        "priority": priority
+    }
+
+
 def build_tasks_list_message(tasks):
     if not tasks:
         return "You have no tasks."
 
     lines = ["Here are your tasks:"]
+    for task in tasks:
+        lines.append(
+            f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
+        )
+
+    return "\n".join(lines)
+
+
+def build_filtered_tasks_message(tasks, priority: str | None = None):
+    if not tasks:
+        if priority:
+            return f"You have no {priority} priority tasks right now."
+        return "You have no tasks."
+
+    if priority:
+        lines = [f"Here are your {priority} priority tasks:"]
+    else:
+        lines = ["Here are your tasks:"]
+
     for task in tasks:
         lines.append(
             f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
@@ -724,6 +773,27 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
         user = require_current_user(db, authorization)
         tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
         task_list = [serialize_task(task) for task in tasks]
+
+        tasks_query = detect_tasks_query_request(request.text)
+
+        if tasks_query:
+            filtered_tasks = tasks
+
+            if tasks_query["priority"]:
+                filtered_tasks = [
+                    task for task in tasks
+                    if normalize_text_for_match(task.priority) == tasks_query["priority"]
+                ]
+
+            return {
+                "action": "list",
+                "message": build_filtered_tasks_message(
+                    filtered_tasks,
+                    tasks_query["priority"]
+                ),
+                "count": len(filtered_tasks),
+                "tasks": [serialize_task(task) for task in filtered_tasks]
+            }
 
         if is_show_tasks_request(request.text):
             return {
