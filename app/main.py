@@ -38,6 +38,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
     token = Column(String, nullable=True, index=True)
+    last_task_id = Column(Integer, nullable=True)
 
 
 class Task(Base):
@@ -71,8 +72,18 @@ def ensure_users_token_column():
             connection.execute(text("ALTER TABLE users ADD COLUMN token VARCHAR"))
 
 
+def ensure_users_last_task_id_column():
+    inspector = inspect(engine)
+    columns = [column["name"] for column in inspector.get_columns("users")]
+
+    if "last_task_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN last_task_id INTEGER"))
+
+
 ensure_tasks_user_id_column()
 ensure_users_token_column()
+ensure_users_last_task_id_column()
 
 
 class EmailRequest(BaseModel):
@@ -356,6 +367,52 @@ def build_filtered_tasks_message(tasks, priority: str | None = None):
     return "\n".join(lines)
 
 
+def detect_memory_reference(text: str):
+    normalized = normalize_text_for_match(text)
+
+    memory_words = [
+        " it ",
+        " that ",
+        " this "
+    ]
+
+    if normalized in {"it", "that", "this"}:
+        return True
+
+    if normalized.startswith("it ") or normalized.startswith("that ") or normalized.startswith("this "):
+        return True
+
+    if normalized.endswith(" it") or normalized.endswith(" that") or normalized.endswith(" this"):
+        return True
+
+    for word in memory_words:
+        if word in f" {normalized} ":
+            return True
+
+    return False
+
+
+def get_user_last_task(db, user: User):
+    if not user.last_task_id:
+        return None
+
+    task = db.query(Task).filter(
+        Task.id == user.last_task_id,
+        Task.user_id == user.id
+    ).first()
+
+    return task
+
+
+def remember_task(db, user: User, task: Task | None):
+    if not task:
+        return
+
+    user.last_task_id = task.id
+    db.commit()
+    db.refresh(user)
+
+
 @app.get("/")
 def root():
     return FileResponse("index.html")
@@ -387,7 +444,8 @@ def signup(request: SignupRequest):
             name=name,
             email=email,
             password_hash=hash_password(password),
-            token=None
+            token=None,
+            last_task_id=None
         )
 
         db.add(user)
@@ -619,6 +677,10 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
         db.delete(task)
         db.commit()
 
+        if user.last_task_id == task_id:
+            user.last_task_id = None
+            db.commit()
+
         return {"message": "Task deleted successfully"}
     except HTTPException:
         raise
@@ -645,6 +707,7 @@ def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | N
 
         db.commit()
         db.refresh(task)
+        remember_task(db, user, task)
 
         return {
             "message": "Task updated successfully",
@@ -711,6 +774,7 @@ Required JSON format:
 
         db.commit()
         db.refresh(task)
+        remember_task(db, user, task)
 
         return {
             "message": "Task updated successfully",
@@ -735,7 +799,13 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
 
-        fallback_task = find_best_task_match(tasks, request.text)
+        fallback_task = None
+
+        if detect_memory_reference(request.text):
+            fallback_task = get_user_last_task(db, user)
+
+        if not fallback_task:
+            fallback_task = find_best_task_match(tasks, request.text)
 
         if fallback_task:
             task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
@@ -747,6 +817,10 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
 
             db.delete(task)
             db.commit()
+
+            if user.last_task_id == task.id:
+                user.last_task_id = None
+                db.commit()
 
             return {
                 "message": "Task deleted successfully",
@@ -773,6 +847,8 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
         user = require_current_user(db, authorization)
         tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
         task_list = [serialize_task(task) for task in tasks]
+        remembered_task = get_user_last_task(db, user)
+        use_memory_reference = detect_memory_reference(request.text)
 
         tasks_query = detect_tasks_query_request(request.text)
 
@@ -785,6 +861,9 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
                     if normalize_text_for_match(task.priority) == tasks_query["priority"]
                 ]
 
+            if filtered_tasks:
+                remember_task(db, user, filtered_tasks[0])
+
             return {
                 "action": "list",
                 "message": build_filtered_tasks_message(
@@ -796,12 +875,29 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
             }
 
         if is_show_tasks_request(request.text):
+            if tasks:
+                remember_task(db, user, tasks[0])
+
             return {
                 "action": "list",
                 "message": build_tasks_list_message(tasks),
                 "count": len(task_list),
                 "tasks": task_list
             }
+
+        prompt_current_task_list = task_list
+        memory_instruction_block = ""
+
+        if remembered_task:
+            memory_instruction_block = f"""
+Last remembered task for this user:
+{json.dumps(serialize_task(remembered_task))}
+
+Memory rules:
+- If the user says "it", "that", "this", "delete it", "update it", "make it tomorrow", or similar wording, use the remembered task.
+- When the user's wording clearly refers to the remembered task, return that task_id.
+- Do not ask for clarification if the remembered task makes the request clear enough.
+"""
 
         prompt = f"""
 You are an AI office assistant.
@@ -816,7 +912,9 @@ Available actions:
 - clarify
 
 Current task list:
-{json.dumps(task_list)}
+{json.dumps(prompt_current_task_list)}
+
+{memory_instruction_block}
 
 User instruction:
 {request.text}
@@ -880,6 +978,11 @@ Required JSON format:
         if not actions:
             raise HTTPException(status_code=400, detail="No actions returned by AI")
 
+        if use_memory_reference and remembered_task:
+            for item in actions:
+                if item.get("action") in {"update", "delete"}:
+                    item["task_id"] = remembered_task.id
+
         for item in actions:
             if item.get("action") == "clarify":
                 return {
@@ -903,6 +1006,7 @@ Required JSON format:
                 db.add(db_task)
                 db.commit()
                 db.refresh(db_task)
+                remember_task(db, user, db_task)
 
                 results.append(
                     {
@@ -914,6 +1018,10 @@ Required JSON format:
 
             elif action == "update":
                 task_id = item.get("task_id")
+
+                if use_memory_reference and remembered_task:
+                    task_id = remembered_task.id
+
                 task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
 
                 if not task:
@@ -925,6 +1033,7 @@ Required JSON format:
 
                 db.commit()
                 db.refresh(task)
+                remember_task(db, user, task)
 
                 results.append(
                     {
@@ -935,7 +1044,13 @@ Required JSON format:
                 )
 
             elif action == "delete":
-                fallback_task = find_best_task_match(tasks, request.text)
+                fallback_task = None
+
+                if use_memory_reference and remembered_task:
+                    fallback_task = remembered_task
+
+                if not fallback_task:
+                    fallback_task = find_best_task_match(tasks, request.text)
 
                 if not fallback_task:
                     raise HTTPException(status_code=400, detail="Please specify which task you want to delete")
@@ -949,6 +1064,10 @@ Required JSON format:
 
                 db.delete(task)
                 db.commit()
+
+                if user.last_task_id == task.id:
+                    user.last_task_id = None
+                    db.commit()
 
                 results.append(
                     {
@@ -1034,6 +1153,7 @@ Email:
             db.add(db_task)
             db.commit()
             db.refresh(db_task)
+            remember_task(db, user, db_task)
 
             saved_tasks.append(serialize_task(db_task))
 
