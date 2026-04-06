@@ -648,26 +648,48 @@
       box.innerText = "Ready";
     }
 
-    function showMessage(message, type = "info") {
+    function showMessage(message, type = "info", title = "") {
       const box = document.getElementById("messageBox");
       box.className = "message-box";
       box.classList.add(`message-${type}`);
       box.innerText = message;
+      box.dataset.message = message || "";
+      box.dataset.type = type || "info";
+      box.dataset.title = title || "";
     }
 
     function addMessageLog(title, message, type = "info") {
       const list = document.getElementById("messageList");
 
+      const normalizedTitle = String(title || "").trim();
+      const normalizedMessage = String(message || "").trim();
+      const normalizedType = String(type || "info").trim();
+
+      const firstItem = list.firstElementChild;
+
+      if (
+        firstItem &&
+        firstItem.dataset &&
+        firstItem.dataset.title === normalizedTitle &&
+        firstItem.dataset.message === normalizedMessage &&
+        firstItem.dataset.type === normalizedType
+      ) {
+        return;
+      }
+
       const item = document.createElement("li");
-      item.className = `message-item message-item-${type}`;
+      item.className = `message-item message-item-${normalizedType}`;
+      item.dataset.title = normalizedTitle;
+      item.dataset.message = normalizedMessage;
+      item.dataset.type = normalizedType;
 
       const header = document.createElement("div");
       header.className = "message-item-header";
-      header.innerText = title;
+      header.innerText = normalizedTitle || "Message";
 
       const body = document.createElement("div");
       body.className = "message-item-body";
-      body.innerText = message;
+      body.innerText = normalizedMessage;
 
       item.appendChild(header);
       item.appendChild(body);
@@ -679,15 +701,39 @@
       }
     }
 
+    function archiveCurrentMessage(nextTitle = "", nextMessage = "", nextType = "info") {
+      const box = document.getElementById("messageBox");
+      const currentMessage = (box.dataset.message || box.innerText || "").trim();
+      const currentType = (box.dataset.type || "info").trim();
+      const currentTitle = (box.dataset.title || "Message").trim();
+
+      const normalizedNextTitle = String(nextTitle || "").trim();
+      const normalizedNextMessage = String(nextMessage || "").trim();
+      const normalizedNextType = String(nextType || "info").trim();
+
+      if (!currentMessage) {
+        return;
+      }
+
+      if (
+        currentTitle === normalizedNextTitle &&
+        currentMessage === normalizedNextMessage &&
+        currentType === normalizedNextType
+      ) {
+        return;
+      }
+
+      addMessageLog(currentTitle, currentMessage, currentType);
+    }
+
     function clearMessages() {
       document.getElementById("messageList").innerHTML = "";
-      showMessage("Message history cleared.", "info");
-      addMessageLog("Info", "Message history cleared.", "info");
+      showMessage("Message history cleared.", "info", "Info");
     }
 
     function notify(title, message, type = "info") {
-      showMessage(message, type);
-      addMessageLog(title, message, type);
+      archiveCurrentMessage(title, message, type);
+      showMessage(message, type, title);
     }
 
     function scrollToTopArea() {
@@ -1433,8 +1479,7 @@
     }
 
     renderUserBox();
-    showMessage("System ready.", "info");
-    addMessageLog("System", "Application loaded successfully.", "info");
+    showMessage("System ready.", "info", "System");
     renderEmptyStats("Please login to view your dashboard.");
     loadTasks({ silent: true });
   </script>
