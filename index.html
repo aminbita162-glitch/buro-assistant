@@ -190,6 +190,8 @@
       display: block;
       min-height: 48px;
       border: 1px solid transparent;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .status-neutral {
@@ -938,6 +940,24 @@
       return fallbackType;
     }
 
+    function buildSuccessStatusMessage(data, fallbackMessage) {
+      const lines = [fallbackMessage];
+
+      if (data && data.task) {
+        lines.push(formatTaskLine(data.task));
+      } else if (data && data.deleted_task) {
+        lines.push(formatTaskLine(data.deleted_task));
+      } else if (data && data.results && Array.isArray(data.results)) {
+        data.results.forEach(item => {
+          if (item.task) {
+            lines.push(formatTaskLine(item.task));
+          }
+        });
+      }
+
+      return lines.join("\n");
+    }
+
     async function parseResponse(res) {
       const contentType = res.headers.get("content-type") || "";
 
@@ -1232,7 +1252,7 @@
           return;
         }
 
-        showStatus("Task request completed successfully.", "success");
+        showStatus(buildSuccessStatusMessage(data, "Task request completed successfully."), "success");
         notify("Task Request Success", responseText, responseType);
         document.getElementById("input").value = "";
         await Promise.all([
@@ -1285,7 +1305,7 @@
           return;
         }
 
-        showStatus("Task deleted successfully.", "success");
+        showStatus(buildSuccessStatusMessage(data, "Task deleted successfully."), "success");
         notify("Delete Success", formatResponse(data), "success");
         await Promise.all([
           loadStats({ silent: true }),
@@ -1359,7 +1379,7 @@
           return;
         }
 
-        showStatus("Task updated successfully.", "success");
+        showStatus(buildSuccessStatusMessage(data, "Task updated successfully."), "success");
         notify("Update Success", responseText, responseType);
         await Promise.all([
           loadStats({ silent: true }),
