@@ -208,7 +208,9 @@ def extract_delete_search_text(text: str):
     normalized = normalize_text_for_match(text)
     prefixes = [
         "delete ",
+        "delete task ",
         "remove ",
+        "remove task ",
         "erase ",
         "drop ",
         "cancel "
@@ -247,81 +249,27 @@ def extract_complete_search_text(text: str):
     return normalized
 
 
-def find_best_task_match(tasks, user_text: str):
-    search_text = extract_delete_search_text(user_text)
+def extract_update_search_text(text: str):
+    normalized = normalize_text_for_match(text)
+    prefixes = [
+        "update ",
+        "update task ",
+        "edit ",
+        "edit task ",
+        "change ",
+        "change task ",
+        "modify ",
+        "modify task ",
+        "set ",
+    ]
 
-    if not search_text:
-        return None
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            candidate = normalized[len(prefix):].strip()
+            if candidate:
+                return candidate
 
-    normalized_search = normalize_text_for_match(search_text)
-    search_words = [word for word in normalized_search.split(" ") if word]
-
-    if not search_words:
-        return None
-
-    scored = []
-
-    for task in tasks:
-        title = normalize_text_for_match(task.title)
-        deadline = normalize_text_for_match(task.deadline)
-        priority = normalize_text_for_match(task.priority)
-        status = normalize_text_for_match(task.status or "active")
-
-        score = 0
-
-        if normalized_search == title:
-            score += 1000
-
-        if normalized_search in title:
-            score += 500
-
-        if normalized_search == deadline:
-            score += 250
-
-        if normalized_search in deadline:
-            score += 100
-
-        if normalized_search == priority:
-            score += 100
-
-        if normalized_search in priority:
-            score += 50
-
-        if normalized_search == status:
-            score += 50
-
-        matched_words = 0
-        for word in search_words:
-            if word in title:
-                score += 40
-                matched_words += 1
-            elif word in deadline:
-                score += 15
-                matched_words += 1
-            elif word in priority:
-                score += 10
-                matched_words += 1
-            elif word in status:
-                score += 5
-                matched_words += 1
-
-        if matched_words == len(search_words):
-            score += 200
-
-        if score > 0:
-            scored.append((score, task.id, task))
-
-    if not scored:
-        return None
-
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    top_score = scored[0][0]
-    top_items = [item for item in scored if item[0] == top_score]
-
-    if len(top_items) > 1:
-        return None
-
-    return scored[0][2]
+    return normalized
 
 
 def is_show_tasks_request(text: str):
@@ -534,6 +482,217 @@ def mark_task_completed(db, user: User, task: Task):
     db.refresh(task)
     clear_remembered_task(db, user, task)
     return task
+
+
+def build_task_brief(task: Task):
+    return f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
+
+
+def build_clarify_message_for_tasks(tasks, action_word: str):
+    if not tasks:
+        return f"Which task would you like me to {action_word}?"
+
+    lines = [f"Which task would you like me to {action_word}?"]
+    for task in tasks[:5]:
+        lines.append(build_task_brief(task))
+
+    return "\n".join(lines)
+
+
+def get_task_by_id_from_list(tasks, task_id):
+    try:
+        normalized_id = int(task_id)
+    except (TypeError, ValueError):
+        return None
+
+    for task in tasks:
+        if task.id == normalized_id:
+            return task
+
+    return None
+
+
+def score_task_match(task: Task, search_text: str):
+    normalized_search = normalize_text_for_match(search_text)
+
+    if not normalized_search:
+        return 0
+
+    search_words = [word for word in normalized_search.split(" ") if word]
+    if not search_words:
+        return 0
+
+    title = normalize_text_for_match(task.title)
+    deadline = normalize_text_for_match(task.deadline)
+    priority = normalize_text_for_match(task.priority)
+    status = normalize_text_for_match(task.status or "active")
+    task_id_text = str(task.id)
+
+    score = 0
+
+    if normalized_search == title:
+        score += 1000
+
+    if normalized_search in title:
+        score += 500
+
+    if normalized_search == deadline:
+        score += 250
+
+    if normalized_search in deadline:
+        score += 100
+
+    if normalized_search == priority:
+        score += 100
+
+    if normalized_search in priority:
+        score += 50
+
+    if normalized_search == status:
+        score += 50
+
+    if normalized_search == task_id_text or normalized_search == f"#{task_id_text}":
+        score += 1200
+
+    matched_words = 0
+
+    for word in search_words:
+        if word == task_id_text or word == f"#{task_id_text}":
+            score += 300
+            matched_words += 1
+        elif word in title:
+            score += 40
+            matched_words += 1
+        elif word in deadline:
+            score += 15
+            matched_words += 1
+        elif word in priority:
+            score += 10
+            matched_words += 1
+        elif word in status:
+            score += 5
+            matched_words += 1
+
+    if matched_words == len(search_words):
+        score += 200
+
+    return score
+
+
+def find_matching_tasks(tasks, user_text: str):
+    normalized_search = normalize_text_for_match(user_text)
+
+    if not normalized_search:
+        return []
+
+    scored = []
+
+    for task in tasks:
+        score = score_task_match(task, normalized_search)
+        if score > 0:
+            scored.append((score, task.id, task))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in scored]
+
+
+def find_best_task_match(tasks, user_text: str):
+    matches = find_matching_tasks(tasks, extract_delete_search_text(user_text))
+
+    if not matches:
+        return None
+
+    if len(matches) == 1:
+        return matches[0]
+
+    top_score = score_task_match(matches[0], extract_delete_search_text(user_text))
+    second_score = score_task_match(matches[1], extract_delete_search_text(user_text))
+
+    if top_score == second_score:
+        return None
+
+    return matches[0]
+
+
+def resolve_task_reference(
+    tasks,
+    full_request_text: str,
+    action_item: dict | None = None,
+    remembered_task: Task | None = None,
+    use_memory_reference: bool = False,
+    action_type: str = "update"
+):
+    if use_memory_reference and remembered_task:
+        return {
+            "type": "resolved",
+            "task": remembered_task
+        }
+
+    action_item = action_item or {}
+
+    ai_task_id = action_item.get("task_id")
+    if ai_task_id is not None:
+        task_by_id = get_task_by_id_from_list(tasks, ai_task_id)
+        if task_by_id:
+            return {
+                "type": "resolved",
+                "task": task_by_id
+            }
+
+    candidate_texts = []
+
+    if action_type == "delete":
+        candidate_texts.append(extract_delete_search_text(full_request_text))
+    elif action_type == "update":
+        candidate_texts.append(extract_update_search_text(full_request_text))
+    else:
+        candidate_texts.append(normalize_text_for_match(full_request_text))
+
+    if action_item.get("title"):
+        candidate_texts.insert(0, action_item.get("title", ""))
+
+    if action_item.get("deadline"):
+        candidate_texts.append(action_item.get("deadline", ""))
+
+    checked_texts = []
+    best_matches = []
+
+    for text_value in candidate_texts:
+        normalized = normalize_text_for_match(text_value)
+        if not normalized or normalized in checked_texts:
+            continue
+
+        checked_texts.append(normalized)
+        matches = find_matching_tasks(tasks, normalized)
+
+        if matches:
+            best_matches = matches
+            break
+
+    if not best_matches:
+        return {
+            "type": "not_found"
+        }
+
+    if len(best_matches) == 1:
+        return {
+            "type": "resolved",
+            "task": best_matches[0]
+        }
+
+    first_score = score_task_match(best_matches[0], checked_texts[0])
+    second_score = score_task_match(best_matches[1], checked_texts[0])
+
+    if first_score > second_score:
+        return {
+            "type": "resolved",
+            "task": best_matches[0]
+        }
+
+    return {
+        "type": "ambiguous",
+        "tasks": best_matches[:5]
+    }
 
 
 @app.get("/")
@@ -797,11 +956,15 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
+        deleted_task = serialize_task(task)
         db.delete(task)
         db.commit()
         clear_remembered_task(db, user, task)
 
-        return {"message": "Task deleted successfully"}
+        return {
+            "message": "Task deleted successfully",
+            "deleted_task": deleted_task
+        }
     except HTTPException:
         raise
     except Exception as error:
@@ -866,10 +1029,17 @@ Current task:
 User instruction:
 {request.text}
 
+Rules:
+- Keep the original value if the user did not ask to change it.
+- If the user only changes the deadline, keep title and priority unchanged.
+- If the user only changes the priority, keep title and deadline unchanged.
+- If the user only changes the title, keep deadline and priority unchanged.
+- priority must be one of: low, medium, high
+
 Required JSON format:
 {{
   "title": "updated task title",
-  "deadline": "updated deadline or Not specified",
+  "deadline": "updated deadline or current deadline",
   "priority": "low, medium, or high"
 }}
 """
@@ -889,9 +1059,9 @@ Required JSON format:
                 detail="AI response was not valid JSON"
             )
 
-        task.title = parsed.get("title", task.title)
-        task.deadline = parsed.get("deadline", task.deadline)
-        task.priority = parsed.get("priority", task.priority)
+        task.title = parsed.get("title", task.title) or task.title
+        task.deadline = parsed.get("deadline", task.deadline) or task.deadline
+        task.priority = parsed.get("priority", task.priority) or task.priority
         task.status = task.status or "active"
 
         db.commit()
@@ -921,32 +1091,46 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
 
-        fallback_task = None
+        remembered_task = get_user_last_task(db, user)
+        use_memory_reference = detect_memory_reference(request.text)
 
-        if detect_memory_reference(request.text):
-            fallback_task = get_user_last_task(db, user)
+        resolved = resolve_task_reference(
+            tasks=tasks,
+            full_request_text=request.text,
+            action_item={},
+            remembered_task=remembered_task,
+            use_memory_reference=use_memory_reference,
+            action_type="delete"
+        )
 
-        if not fallback_task:
-            fallback_task = find_best_task_match(tasks, request.text)
+        if resolved["type"] == "not_found":
+            raise HTTPException(status_code=404, detail="Task not found")
 
-        if fallback_task:
-            task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
-
-            if not task:
-                raise HTTPException(status_code=404, detail="Task not found")
-
-            deleted_task = serialize_task(task)
-
-            db.delete(task)
-            db.commit()
-            clear_remembered_task(db, user, task)
-
+        if resolved["type"] == "ambiguous":
             return {
-                "message": "Task deleted successfully",
-                "deleted_task": deleted_task
+                "action": "clarify",
+                "message": build_clarify_message_for_tasks(resolved["tasks"], "delete"),
+                "tasks": [serialize_task(task) for task in resolved["tasks"]]
             }
 
-        raise HTTPException(status_code=404, detail="Task not found")
+        task = db.query(Task).filter(
+            Task.id == resolved["task"].id,
+            Task.user_id == user.id
+        ).first()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        deleted_task = serialize_task(task)
+
+        db.delete(task)
+        db.commit()
+        clear_remembered_task(db, user, task)
+
+        return {
+            "message": "Task deleted successfully",
+            "deleted_task": deleted_task
+        }
     except HTTPException:
         raise
     except Exception as error:
@@ -1069,12 +1253,12 @@ Rules:
 - Use create only when the user wants a brand new task.
 - Use update only when the user clearly refers to one existing task and wants it changed.
 - Use delete only when the user clearly refers to one existing task and wants it removed.
-- For update and delete, choose exactly one best matching task_id.
+- For update and delete, choose exactly one best matching task_id when possible.
 - Prefer exact title match first.
-- If exact match does not exist, allow partial title match.
-- If the user refers to only one distinctive word from the title such as "milk", use the matching task when there is only one clear best match.
-- Only use clarify for delete when multiple tasks could match or no clear best match exists.
+- If exact match does not exist, allow partial title match only when there is one clear best match.
+- If multiple tasks could match, use clarify.
 - Do not update multiple similar tasks at once.
+- Do not delete multiple similar tasks at once.
 - For create, set task_id to null and return title, deadline, and priority.
 - For update, return the correct task_id and the updated title, deadline, and priority.
 - For delete, return the correct task_id. Title, deadline, and priority can be empty strings.
@@ -1140,6 +1324,8 @@ Required JSON format:
         for item in actions:
             action = item.get("action")
 
+            current_tasks = get_active_tasks(db, user.id)
+
             if action == "create":
                 db_task = Task(
                     title=item.get("title", ""),
@@ -1162,19 +1348,49 @@ Required JSON format:
                 )
 
             elif action == "update":
-                task_id = item.get("task_id")
+                resolved = resolve_task_reference(
+                    tasks=current_tasks,
+                    full_request_text=request.text,
+                    action_item=item,
+                    remembered_task=remembered_task,
+                    use_memory_reference=use_memory_reference,
+                    action_type="update"
+                )
 
-                if use_memory_reference and remembered_task:
-                    task_id = remembered_task.id
+                if resolved["type"] == "not_found":
+                    return {
+                        "action": "clarify",
+                        "message": "Which task would you like me to update?"
+                    }
 
-                task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+                if resolved["type"] == "ambiguous":
+                    return {
+                        "action": "clarify",
+                        "message": build_clarify_message_for_tasks(resolved["tasks"], "update"),
+                        "tasks": [serialize_task(task) for task in resolved["tasks"]]
+                    }
+
+                task = db.query(Task).filter(
+                    Task.id == resolved["task"].id,
+                    Task.user_id == user.id
+                ).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
 
-                task.title = item.get("title", task.title)
-                task.deadline = item.get("deadline", task.deadline)
-                task.priority = item.get("priority", task.priority)
+                new_title = item.get("title", "")
+                new_deadline = item.get("deadline", "")
+                new_priority = item.get("priority", "")
+
+                if new_title:
+                    task.title = new_title
+
+                if new_deadline:
+                    task.deadline = new_deadline
+
+                if new_priority:
+                    task.priority = new_priority
+
                 task.status = task.status or "active"
 
                 db.commit()
@@ -1190,18 +1406,32 @@ Required JSON format:
                 )
 
             elif action == "delete":
-                fallback_task = None
+                resolved = resolve_task_reference(
+                    tasks=current_tasks,
+                    full_request_text=request.text,
+                    action_item=item,
+                    remembered_task=remembered_task,
+                    use_memory_reference=use_memory_reference,
+                    action_type="delete"
+                )
 
-                if use_memory_reference and remembered_task:
-                    fallback_task = remembered_task
+                if resolved["type"] == "not_found":
+                    return {
+                        "action": "clarify",
+                        "message": "Which task would you like me to delete?"
+                    }
 
-                if not fallback_task:
-                    fallback_task = find_best_task_match(tasks, request.text)
+                if resolved["type"] == "ambiguous":
+                    return {
+                        "action": "clarify",
+                        "message": build_clarify_message_for_tasks(resolved["tasks"], "delete"),
+                        "tasks": [serialize_task(task) for task in resolved["tasks"]]
+                    }
 
-                if not fallback_task:
-                    raise HTTPException(status_code=400, detail="Please specify which task you want to delete")
-
-                task = db.query(Task).filter(Task.id == fallback_task.id, Task.user_id == user.id).first()
+                task = db.query(Task).filter(
+                    Task.id == resolved["task"].id,
+                    Task.user_id == user.id
+                ).first()
 
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
