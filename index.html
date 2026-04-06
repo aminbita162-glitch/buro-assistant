@@ -839,14 +839,19 @@
       });
     }
 
-    function handleUnauthorized(message = "Your session has expired. Please login again.") {
+    function handleUnauthorized(message = "Your session has expired. Please login again.", options = {}) {
+      const skipNotify = options.skipNotify === true;
+
       clearAuthData();
       renderUserBox();
       renderEmptyTasks("Please login to view your tasks.");
       renderEmptyStats("Please login to view your dashboard.");
       setOutput(message);
       showStatus(message, "error");
-      notify("Unauthorized", message, "error");
+
+      if (!skipNotify) {
+        notify("Unauthorized", message, "error");
+      }
     }
 
     function formatTaskLine(task) {
@@ -952,6 +957,48 @@
       }
     }
 
+    async function validateSession(options = {}) {
+      const silent = options.silent === true;
+
+      if (!isLoggedIn()) {
+        return false;
+      }
+
+      try {
+        const res = await fetch(buildApiUrl("/auth/me"), {
+          headers: buildHeaders()
+        });
+
+        const data = await parseResponse(res);
+
+        if (res.status === 401) {
+          handleUnauthorized("Your session has expired. Please login again.", { skipNotify: silent });
+          return false;
+        }
+
+        if (!res.ok) {
+          if (!silent) {
+            showStatus(data.detail || "Session check failed.", "error");
+            notify("Session Error", data.detail || "Session check failed.", "error");
+          }
+          return false;
+        }
+
+        if (data.user) {
+          localStorage.setItem("buro_user", JSON.stringify(data.user));
+          renderUserBox();
+        }
+
+        return true;
+      } catch (error) {
+        if (!silent) {
+          showStatus("Unable to verify your session.", "error");
+          notify("Session Error", "Unable to verify your session.", "error");
+        }
+        return false;
+      }
+    }
+
     async function signup() {
       const name = document.getElementById("signupName").value.trim();
       const email = document.getElementById("signupEmail").value.trim();
@@ -1051,8 +1098,10 @@
         notify("Login Success", `Logged in as ${data.user.name} (${data.user.email})`, "success");
 
         document.getElementById("loginPassword").value = "";
-        await loadStats({ silent: true });
-        await loadTasks({ silent: true });
+        await Promise.all([
+          loadStats({ silent: true }),
+          loadTasks({ silent: true })
+        ]);
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1175,8 +1224,10 @@
         if (data.action === "clarify") {
           showStatus("Clarification needed.", "warning");
           notify("Task Clarification", responseText, "warning");
-          await loadStats({ silent: true });
-          await loadTasks({ silent: true });
+          await Promise.all([
+            loadStats({ silent: true }),
+            loadTasks({ silent: true })
+          ]);
           scrollToMessages();
           return;
         }
@@ -1184,8 +1235,10 @@
         showStatus("Task request completed successfully.", "success");
         notify("Task Request Success", responseText, responseType);
         document.getElementById("input").value = "";
-        await loadStats({ silent: true });
-        await loadTasks({ silent: true });
+        await Promise.all([
+          loadStats({ silent: true }),
+          loadTasks({ silent: true })
+        ]);
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1234,8 +1287,10 @@
 
         showStatus("Task deleted successfully.", "success");
         notify("Delete Success", formatResponse(data), "success");
-        await loadStats({ silent: true });
-        await loadTasks({ silent: true });
+        await Promise.all([
+          loadStats({ silent: true }),
+          loadTasks({ silent: true })
+        ]);
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1296,16 +1351,20 @@
         if (data.action === "clarify") {
           showStatus("Clarification needed.", "warning");
           notify("Update Clarification", responseText, "warning");
-          await loadStats({ silent: true });
-          await loadTasks({ silent: true });
+          await Promise.all([
+            loadStats({ silent: true }),
+            loadTasks({ silent: true })
+          ]);
           scrollToMessages();
           return;
         }
 
         showStatus("Task updated successfully.", "success");
         notify("Update Success", responseText, responseType);
-        await loadStats({ silent: true });
-        await loadTasks({ silent: true });
+        await Promise.all([
+          loadStats({ silent: true }),
+          loadTasks({ silent: true })
+        ]);
         scrollToTopArea();
       } catch (error) {
         setOutput(String(error));
@@ -1338,7 +1397,7 @@
         const data = await parseResponse(res);
 
         if (res.status === 401) {
-          handleUnauthorized();
+          handleUnauthorized(undefined, { skipNotify: silent });
           return;
         }
 
@@ -1379,7 +1438,7 @@
         const data = await parseResponse(res);
 
         if (res.status === 401) {
-          handleUnauthorized();
+          handleUnauthorized(undefined, { skipNotify: silent });
           return;
         }
 
@@ -1478,10 +1537,37 @@
       scrollToTasks();
     }
 
-    renderUserBox();
-    showMessage("System ready.", "info", "System");
-    renderEmptyStats("Please login to view your dashboard.");
-    loadTasks({ silent: true });
+    async function initializeApp() {
+      renderUserBox();
+      showMessage("System ready.", "info", "System");
+      setOutput("No response yet.");
+
+      if (!isLoggedIn()) {
+        renderEmptyStats("Please login to view your dashboard.");
+        renderEmptyTasks("Please login to view your tasks.");
+        showStatus("Ready", "neutral");
+        return;
+      }
+
+      showStatus("Restoring your session...", "loading");
+
+      const isSessionValid = await validateSession({ silent: true });
+
+      if (!isSessionValid) {
+        showMessage("System ready.", "info", "System");
+        showStatus("Ready", "neutral");
+        return;
+      }
+
+      await Promise.all([
+        loadStats({ silent: true }),
+        loadTasks({ silent: true })
+      ]);
+
+      showStatus("Ready", "neutral");
+    }
+
+    initializeApp();
   </script>
 </body>
 </html>
