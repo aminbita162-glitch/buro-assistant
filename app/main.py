@@ -258,11 +258,58 @@ def find_best_task_match(tasks, user_text: str):
     return scored[0][2]
 
 
+def is_show_tasks_request(text: str):
+    normalized = normalize_text_for_match(text)
+
+    exact_matches = {
+        "show my tasks",
+        "show all tasks",
+        "show tasks",
+        "list my tasks",
+        "list all tasks",
+        "list tasks",
+        "display my tasks",
+        "display all tasks",
+        "display tasks",
+        "my tasks",
+        "all tasks"
+    }
+
+    if normalized in exact_matches:
+        return True
+
+    patterns = [
+        "show my tasks",
+        "show all tasks",
+        "list my tasks",
+        "list all tasks",
+        "display my tasks",
+        "display all tasks"
+    ]
+
+    for pattern in patterns:
+        if pattern in normalized:
+            return True
+
+    return False
+
+
+def build_tasks_list_message(tasks):
+    if not tasks:
+        return "You have no tasks."
+
+    lines = ["Here are your tasks:"]
+    for task in tasks:
+        lines.append(
+            f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
+        )
+
+    return "\n".join(lines)
+
+
 @app.get("/")
 def root():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(base_dir, "index.html")
-    return FileResponse(file_path)
+    return FileResponse("index.html")
 
 
 @app.get("/health")
@@ -677,6 +724,14 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
         user = require_current_user(db, authorization)
         tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
         task_list = [serialize_task(task) for task in tasks]
+
+        if is_show_tasks_request(request.text):
+            return {
+                "action": "list",
+                "message": build_tasks_list_message(tasks),
+                "count": len(task_list),
+                "tasks": task_list
+            }
 
         prompt = f"""
 You are an AI office assistant.
