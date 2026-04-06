@@ -48,6 +48,7 @@ class Task(Base):
     title = Column(String)
     deadline = Column(String)
     priority = Column(String)
+    status = Column(String, nullable=True)
     user_id = Column(Integer, index=True, nullable=True)
 
 
@@ -61,6 +62,15 @@ def ensure_tasks_user_id_column():
     if "user_id" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
+
+
+def ensure_tasks_status_column():
+    inspector = inspect(engine)
+    columns = [column["name"] for column in inspector.get_columns("tasks")]
+
+    if "status" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN status VARCHAR"))
 
 
 def ensure_users_token_column():
@@ -82,6 +92,7 @@ def ensure_users_last_task_id_column():
 
 
 ensure_tasks_user_id_column()
+ensure_tasks_status_column()
 ensure_users_token_column()
 ensure_users_last_task_id_column()
 
@@ -141,6 +152,7 @@ def serialize_task(task: Task):
         "title": task.title,
         "deadline": task.deadline,
         "priority": task.priority,
+        "status": task.status or "active",
         "user_id": task.user_id,
     }
 
@@ -180,6 +192,18 @@ def normalize_text_for_match(value: str):
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def get_active_tasks_query(db, user_id: int):
+    return (
+        db.query(Task)
+        .filter(Task.user_id == user_id)
+        .filter(or_(Task.status.is_(None), Task.status != "completed"))
+    )
+
+
+def get_active_tasks(db, user_id: int):
+    return get_active_tasks_query(db, user_id).order_by(Task.id.desc()).all()
+
+
 def extract_delete_search_text(text: str):
     normalized = normalize_text_for_match(text)
     prefixes = [
@@ -188,6 +212,30 @@ def extract_delete_search_text(text: str):
         "erase ",
         "drop ",
         "cancel "
+    ]
+
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            candidate = normalized[len(prefix):].strip()
+            if candidate:
+                return candidate
+
+    return normalized
+
+
+def extract_complete_search_text(text: str):
+    normalized = normalize_text_for_match(text)
+    prefixes = [
+        "complete ",
+        "complete task ",
+        "mark ",
+        "mark task ",
+        "finish ",
+        "done ",
+        "انجام ",
+        "انجامش کن ",
+        "تمام ",
+        "تموم "
     ]
 
     for prefix in prefixes:
@@ -217,6 +265,7 @@ def find_best_task_match(tasks, user_text: str):
         title = normalize_text_for_match(task.title)
         deadline = normalize_text_for_match(task.deadline)
         priority = normalize_text_for_match(task.priority)
+        status = normalize_text_for_match(task.status or "active")
 
         score = 0
 
@@ -238,6 +287,9 @@ def find_best_task_match(tasks, user_text: str):
         if normalized_search in priority:
             score += 50
 
+        if normalized_search == status:
+            score += 50
+
         matched_words = 0
         for word in search_words:
             if word in title:
@@ -248,6 +300,9 @@ def find_best_task_match(tasks, user_text: str):
                 matched_words += 1
             elif word in priority:
                 score += 10
+                matched_words += 1
+            elif word in status:
+                score += 5
                 matched_words += 1
 
         if matched_words == len(search_words):
@@ -335,6 +390,79 @@ def detect_tasks_query_request(text: str):
     }
 
 
+def detect_memory_reference(text: str):
+    normalized = normalize_text_for_match(text)
+
+    memory_only_values = {
+        "it",
+        "that",
+        "this",
+        "انجام شد",
+        "تموم شد",
+        "تمام شد"
+    }
+
+    if normalized in memory_only_values:
+        return True
+
+    if normalized.startswith("it ") or normalized.startswith("that ") or normalized.startswith("this "):
+        return True
+
+    if normalized.endswith(" it") or normalized.endswith(" that") or normalized.endswith(" this"):
+        return True
+
+    if " it " in f" {normalized} ":
+        return True
+
+    if " that " in f" {normalized} ":
+        return True
+
+    if " this " in f" {normalized} ":
+        return True
+
+    return False
+
+
+def detect_completion_request(text: str):
+    normalized = normalize_text_for_match(text)
+
+    exact_matches = {
+        "done",
+        "completed",
+        "complete it",
+        "mark it done",
+        "mark it completed",
+        "finish it",
+        "انجام شد",
+        "تموم شد",
+        "تمام شد",
+        "این انجام شد",
+        "این تموم شد",
+        "این تمام شد"
+    }
+
+    if normalized in exact_matches:
+        return True
+
+    patterns = [
+        "complete it",
+        "mark it done",
+        "mark it completed",
+        "finish it",
+        "done it",
+        "completed it",
+        "انجام شد",
+        "تموم شد",
+        "تمام شد"
+    ]
+
+    for pattern in patterns:
+        if pattern in normalized:
+            return True
+
+    return False
+
+
 def build_tasks_list_message(tasks):
     if not tasks:
         return "You have no tasks."
@@ -367,31 +495,6 @@ def build_filtered_tasks_message(tasks, priority: str | None = None):
     return "\n".join(lines)
 
 
-def detect_memory_reference(text: str):
-    normalized = normalize_text_for_match(text)
-
-    memory_words = [
-        " it ",
-        " that ",
-        " this "
-    ]
-
-    if normalized in {"it", "that", "this"}:
-        return True
-
-    if normalized.startswith("it ") or normalized.startswith("that ") or normalized.startswith("this "):
-        return True
-
-    if normalized.endswith(" it") or normalized.endswith(" that") or normalized.endswith(" this"):
-        return True
-
-    for word in memory_words:
-        if word in f" {normalized} ":
-            return True
-
-    return False
-
-
 def get_user_last_task(db, user: User):
     if not user.last_task_id:
         return None
@@ -411,6 +514,26 @@ def remember_task(db, user: User, task: Task | None):
     user.last_task_id = task.id
     db.commit()
     db.refresh(user)
+
+
+def clear_remembered_task(db, user: User, task: Task | None = None):
+    if task is not None and user.last_task_id != task.id:
+        return
+
+    if user.last_task_id is None:
+        return
+
+    user.last_task_id = None
+    db.commit()
+    db.refresh(user)
+
+
+def mark_task_completed(db, user: User, task: Task):
+    task.status = "completed"
+    db.commit()
+    db.refresh(task)
+    clear_remembered_task(db, user, task)
+    return task
 
 
 @app.get("/")
@@ -545,7 +668,7 @@ def get_stats(authorization: str | None = Header(default=None)):
 
     try:
         user = require_current_user(db, authorization)
-        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
+        tasks = get_active_tasks(db, user.id)
 
         total = len(tasks)
         high_count = 0
@@ -585,7 +708,7 @@ def get_tasks(authorization: str | None = Header(default=None)):
 
     try:
         user = require_current_user(db, authorization)
-        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
+        tasks = get_active_tasks(db, user.id)
         result = [serialize_task(task) for task in tasks]
 
         return {
@@ -611,7 +734,7 @@ def search_tasks(
 
     try:
         user = require_current_user(db, authorization)
-        query = db.query(Task).filter(Task.user_id == user.id)
+        query = get_active_tasks_query(db, user.id)
 
         if q.strip():
             query = query.filter(
@@ -676,10 +799,7 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
 
         db.delete(task)
         db.commit()
-
-        if user.last_task_id == task_id:
-            user.last_task_id = None
-            db.commit()
+        clear_remembered_task(db, user, task)
 
         return {"message": "Task deleted successfully"}
     except HTTPException:
@@ -704,6 +824,7 @@ def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | N
         task.title = request.title
         task.deadline = request.deadline
         task.priority = request.priority
+        task.status = task.status or "active"
 
         db.commit()
         db.refresh(task)
@@ -771,6 +892,7 @@ Required JSON format:
         task.title = parsed.get("title", task.title)
         task.deadline = parsed.get("deadline", task.deadline)
         task.priority = parsed.get("priority", task.priority)
+        task.status = task.status or "active"
 
         db.commit()
         db.refresh(task)
@@ -794,7 +916,7 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
 
     try:
         user = require_current_user(db, authorization)
-        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
+        tasks = get_active_tasks(db, user.id)
 
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
@@ -817,10 +939,7 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
 
             db.delete(task)
             db.commit()
-
-            if user.last_task_id == task.id:
-                user.last_task_id = None
-                db.commit()
+            clear_remembered_task(db, user, task)
 
             return {
                 "message": "Task deleted successfully",
@@ -845,10 +964,36 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
 
     try:
         user = require_current_user(db, authorization)
-        tasks = db.query(Task).filter(Task.user_id == user.id).order_by(Task.id.desc()).all()
+        tasks = get_active_tasks(db, user.id)
         task_list = [serialize_task(task) for task in tasks]
         remembered_task = get_user_last_task(db, user)
         use_memory_reference = detect_memory_reference(request.text)
+
+        if detect_completion_request(request.text):
+            target_task = None
+
+            if remembered_task:
+                target_task = remembered_task
+
+            if not target_task:
+                target_task = find_best_task_match(tasks, extract_complete_search_text(request.text))
+
+            if not target_task and len(tasks) == 1:
+                target_task = tasks[0]
+
+            if not target_task:
+                return {
+                    "action": "clarify",
+                    "message": "Please tell me which task was completed."
+                }
+
+            completed_task = mark_task_completed(db, user, target_task)
+
+            return {
+                "action": "complete",
+                "message": "Task marked as completed",
+                "task": serialize_task(completed_task)
+            }
 
         tasks_query = detect_tasks_query_request(request.text)
 
@@ -885,7 +1030,6 @@ def assistant(request: AssistantRequest, authorization: str | None = Header(defa
                 "tasks": task_list
             }
 
-        prompt_current_task_list = task_list
         memory_instruction_block = ""
 
         if remembered_task:
@@ -911,8 +1055,8 @@ Available actions:
 - delete
 - clarify
 
-Current task list:
-{json.dumps(prompt_current_task_list)}
+Current active task list:
+{json.dumps(task_list)}
 
 {memory_instruction_block}
 
@@ -1001,6 +1145,7 @@ Required JSON format:
                     title=item.get("title", ""),
                     deadline=item.get("deadline", "Not specified"),
                     priority=item.get("priority", "medium"),
+                    status="active",
                     user_id=user.id
                 )
                 db.add(db_task)
@@ -1030,6 +1175,7 @@ Required JSON format:
                 task.title = item.get("title", task.title)
                 task.deadline = item.get("deadline", task.deadline)
                 task.priority = item.get("priority", task.priority)
+                task.status = task.status or "active"
 
                 db.commit()
                 db.refresh(task)
@@ -1064,10 +1210,7 @@ Required JSON format:
 
                 db.delete(task)
                 db.commit()
-
-                if user.last_task_id == task.id:
-                    user.last_task_id = None
-                    db.commit()
+                clear_remembered_task(db, user, task)
 
                 results.append(
                     {
@@ -1146,8 +1289,9 @@ Email:
         for task in parsed.get("tasks", []):
             db_task = Task(
                 title=task.get("title", ""),
-                deadline=task.get("deadline", ""),
-                priority=task.get("priority", ""),
+                deadline=task.get("deadline", "Not specified"),
+                priority=task.get("priority", "medium"),
+                status="active",
                 user_id=user.id
             )
             db.add(db_task)
