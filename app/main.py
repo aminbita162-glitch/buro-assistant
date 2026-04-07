@@ -1308,7 +1308,7 @@ Required JSON format:
 
         if use_memory_reference and remembered_task:
             for item in actions:
-                if item.get("action") in {"update", "delete"}:
+                if item.get("action") in {"update", "delete"} and not item.get("task_id"):
                     item["task_id"] = remembered_task.id
 
         for item in actions:
