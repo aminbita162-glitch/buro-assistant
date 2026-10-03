@@ -1489,11 +1489,25 @@
           text.className = "task-text";
 
           const badgeClass = getPriorityClass(task.priority);
-          text.innerHTML = `
-            <strong>#${task.id}</strong> - ${task.title}<br>
-            Deadline: ${task.deadline}
-            <span class="badge ${badgeClass}">${task.priority}</span>
-          `;
+
+          const idStrong = document.createElement("strong");
+          idStrong.textContent = `#${task.id}`;
+
+          const titleNode = document.createTextNode(` - ${task.title}`);
+
+          const br = document.createElement("br");
+
+          const deadlineNode = document.createTextNode(`Deadline: ${task.deadline} `);
+
+          const badge = document.createElement("span");
+          badge.className = `badge ${badgeClass}`;
+          badge.textContent = task.priority;
+
+          text.appendChild(idStrong);
+          text.appendChild(titleNode);
+          text.appendChild(br);
+          text.appendChild(deadlineNode);
+          text.appendChild(badge);
 
           const actions = document.createElement("div");
           actions.className = "task-actions";
