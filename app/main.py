@@ -1,33 +1,53 @@
+from __future__ import annotations
+
 import json
 import os
 import hashlib
 import secrets
 import re
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Header
-from fastapi.responses import FileResponse
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+
+from fastapi import FastAPI, HTTPException, Query, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
 from openai import OpenAI
 
-from sqlalchemy import create_engine, Column, Integer, String, or_, text, inspect
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, or_, text, inspect
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import OperationalError
 
-app = FastAPI()
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_ph = PasswordHasher()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    pool_timeout=30
-)
+_engine_kwargs: dict = {"pool_pre_ping": True}
+if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["pool_recycle"] = 300
+    _engine_kwargs["pool_timeout"] = 30
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+SESSION_TTL_HOURS = 24
 
 
 class User(Base):
@@ -37,8 +57,16 @@ class User(Base):
     name = Column(String)
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
-    token = Column(String, nullable=True, index=True)
     last_task_id = Column(Integer, nullable=True)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    token_hash = Column(String, unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class Task(Base):
@@ -52,50 +80,86 @@ class Task(Base):
     user_id = Column(Integer, index=True, nullable=True)
 
 
+# ---------------------------------------------------------------------------
+# Schema bootstrap (pre-Alembic; removed in Phase 3 when Alembic takes over)
+# ---------------------------------------------------------------------------
+
 Base.metadata.create_all(bind=engine)
 
 
-def ensure_tasks_user_id_column():
+def _ensure_column(table: str, column: str, col_type: str):
     inspector = inspect(engine)
-    columns = [column["name"] for column in inspector.get_columns("tasks")]
-
-    if "user_id" not in columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
-
-
-def ensure_tasks_status_column():
-    inspector = inspect(engine)
-    columns = [column["name"] for column in inspector.get_columns("tasks")]
-
-    if "status" not in columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE tasks ADD COLUMN status VARCHAR"))
+    cols = [c["name"] for c in inspector.get_columns(table)]
+    if column not in cols:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 
 
-def ensure_users_token_column():
-    inspector = inspect(engine)
-    columns = [column["name"] for column in inspector.get_columns("users")]
+_ensure_column("tasks", "user_id", "INTEGER")
+_ensure_column("tasks", "status", "VARCHAR")
+# Legacy token column removed from users; sessions table takes over.
+# Keep the column present so existing rows aren't broken until Phase 3 migration.
+_ensure_column("users", "token", "VARCHAR")
+_ensure_column("users", "last_task_id", "INTEGER")
 
-    if "token" not in columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN token VARCHAR"))
+# ---------------------------------------------------------------------------
+# OpenAI client
+# ---------------------------------------------------------------------------
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+
+limiter = Limiter(key_func=get_remote_address)
+
+# ---------------------------------------------------------------------------
+# FastAPI application + middleware
+# ---------------------------------------------------------------------------
+
+app = FastAPI()
+
+# Rate-limit error handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — origins from environment; default to nothing if unset
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-def ensure_users_last_task_id_column():
-    inspector = inspect(engine)
-    columns = [column["name"] for column in inspector.get_columns("users")]
+# Security headers + CSP
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "0"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    return response
 
-    if "last_task_id" not in columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN last_task_id INTEGER"))
 
-
-ensure_tasks_user_id_column()
-ensure_tasks_status_column()
-ensure_users_token_column()
-ensure_users_last_task_id_column()
-
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
 class EmailRequest(BaseModel):
     text: str
@@ -130,23 +194,108 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
 def normalize_email(email):
     return str(email).strip().lower()
 
 
-def hash_password(password: str):
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def serialize_user(user: User):
-    return {
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-    }
+def hash_password(password: str) -> str:
+    """Return an Argon2id hash of the password."""
+    return _ph.hash(password)
 
 
-def serialize_task(task: Task):
+def verify_password(stored_hash: str, password: str) -> bool:
+    """
+    Verify password against stored hash.
+    Supports both Argon2id hashes and legacy SHA-256 hashes (one-time upgrade).
+    Returns True if password is correct.
+    Raises VerifyMismatchError if wrong.
+    """
+    if stored_hash.startswith("$argon2"):
+        _ph.verify(stored_hash, password)
+        return True
+    # Legacy SHA-256 path
+    if stored_hash == _sha256_hex(password):
+        return True
+    raise VerifyMismatchError("password mismatch")
+
+
+def upgrade_password_if_needed(db, user: "User", password: str):
+    """Re-hash a legacy SHA-256 hash to Argon2id in-place (one-time)."""
+    if not user.password_hash.startswith("$argon2"):
+        user.password_hash = hash_password(password)
+        db.commit()
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_session(db, user_id: int) -> str:
+    """Create a new session; rotate (delete all old sessions first)."""
+    db.query(UserSession).filter(UserSession.user_id == user_id).delete()
+    raw_token = secrets.token_hex(32)
+    session = UserSession(
+        user_id=user_id,
+        token_hash=_token_hash(raw_token),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS),
+    )
+    db.add(session)
+    db.commit()
+    return raw_token
+
+
+def get_session_user(db, raw_token: str) -> "Optional[User]":
+    """Look up a valid (non-expired) session and return its User."""
+    th = _token_hash(raw_token)
+    session = db.query(UserSession).filter(UserSession.token_hash == th).first()
+    if not session:
+        return None
+    if session.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        db.delete(session)
+        db.commit()
+        return None
+    return db.query(User).filter(User.id == session.user_id).first()
+
+
+def get_current_user_from_token(db, authorization: Optional[str]) -> "Optional[User]":
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    raw_token = authorization.removeprefix("Bearer ").strip()
+    if not raw_token:
+        return None
+    return get_session_user(db, raw_token)
+
+
+def require_current_user(db, authorization: Optional[str]) -> "User":
+    user = get_current_user_from_token(db, authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+
+def safe_db_error_message(error: Exception) -> str:
+    if isinstance(error, OperationalError):
+        return "Database connection failed. Please try again."
+    return "Internal server error"
+
+
+# ---------------------------------------------------------------------------
+# Serializers
+# ---------------------------------------------------------------------------
+
+def serialize_user(user: User) -> dict:
+    return {"id": user.id, "name": user.name, "email": user.email}
+
+
+def serialize_task(task: Task) -> dict:
     return {
         "id": task.id,
         "title": task.title,
@@ -157,38 +306,11 @@ def serialize_task(task: Task):
     }
 
 
-def get_current_user_from_token(db, authorization: str | None):
-    if not authorization:
-        return None
+# ---------------------------------------------------------------------------
+# Task helpers
+# ---------------------------------------------------------------------------
 
-    if not authorization.startswith("Bearer "):
-        return None
-
-    token = authorization.replace("Bearer ", "").strip()
-
-    if not token:
-        return None
-
-    user = db.query(User).filter(User.token == token).first()
-    return user
-
-
-def require_current_user(db, authorization: str | None):
-    user = get_current_user_from_token(db, authorization)
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    return user
-
-
-def safe_db_error_message(error: Exception):
-    if isinstance(error, OperationalError):
-        return "Database connection failed. Please try again."
-    return "Internal server error"
-
-
-def normalize_text_for_match(value: str):
+def normalize_text_for_match(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
@@ -204,273 +326,141 @@ def get_active_tasks(db, user_id: int):
     return get_active_tasks_query(db, user_id).order_by(Task.id.desc()).all()
 
 
-def extract_delete_search_text(text: str):
+def extract_delete_search_text(text: str) -> str:
     normalized = normalize_text_for_match(text)
-    prefixes = [
-        "delete ",
-        "delete task ",
-        "remove ",
-        "remove task ",
-        "erase ",
-        "drop ",
-        "cancel "
-    ]
-
-    for prefix in prefixes:
+    for prefix in ["delete ", "delete task ", "remove ", "remove task ",
+                   "erase ", "drop ", "cancel "]:
         if normalized.startswith(prefix):
             candidate = normalized[len(prefix):].strip()
             if candidate:
                 return candidate
-
     return normalized
 
 
-def extract_complete_search_text(text: str):
+def extract_complete_search_text(text: str) -> str:
     normalized = normalize_text_for_match(text)
-    prefixes = [
-        "complete ",
-        "complete task ",
-        "mark ",
-        "mark task ",
-        "finish ",
-        "done ",
-        "انجام ",
-        "انجامش کن ",
-        "تمام ",
-        "تموم "
-    ]
-
-    for prefix in prefixes:
+    for prefix in ["complete ", "complete task ", "mark ", "mark task ",
+                   "finish ", "done ", "انجام ", "انجامش کن ", "تمام ", "تموم "]:
         if normalized.startswith(prefix):
             candidate = normalized[len(prefix):].strip()
             if candidate:
                 return candidate
-
     return normalized
 
 
-def extract_update_search_text(text: str):
+def extract_update_search_text(text: str) -> str:
     normalized = normalize_text_for_match(text)
-    prefixes = [
-        "update ",
-        "update task ",
-        "edit ",
-        "edit task ",
-        "change ",
-        "change task ",
-        "modify ",
-        "modify task ",
-        "set ",
-    ]
-
-    for prefix in prefixes:
+    for prefix in ["update ", "update task ", "edit ", "edit task ",
+                   "change ", "change task ", "modify ", "modify task ", "set "]:
         if normalized.startswith(prefix):
             candidate = normalized[len(prefix):].strip()
             if candidate:
                 return candidate
-
     return normalized
 
 
-def is_show_tasks_request(text: str):
+def is_show_tasks_request(text: str) -> bool:
     normalized = normalize_text_for_match(text)
-
-    exact_matches = {
-        "show my tasks",
-        "show all tasks",
-        "show tasks",
-        "list my tasks",
-        "list all tasks",
-        "list tasks",
-        "display my tasks",
-        "display all tasks",
-        "display tasks",
-        "my tasks",
-        "all tasks"
-    }
-
-    if normalized in exact_matches:
+    exact = {"show my tasks", "show all tasks", "show tasks", "list my tasks",
+             "list all tasks", "list tasks", "display my tasks", "display all tasks",
+             "display tasks", "my tasks", "all tasks"}
+    if normalized in exact:
         return True
-
-    patterns = [
-        "show my tasks",
-        "show all tasks",
-        "list my tasks",
-        "list all tasks",
-        "display my tasks",
-        "display all tasks"
-    ]
-
-    for pattern in patterns:
+    for pattern in ["show my tasks", "show all tasks", "list my tasks",
+                    "list all tasks", "display my tasks", "display all tasks"]:
         if pattern in normalized:
             return True
-
     return False
 
 
 def detect_tasks_query_request(text: str):
     normalized = normalize_text_for_match(text)
-
     if not normalized:
         return None
-
     trigger_words = ["show", "list", "display"]
     has_task_word = "task" in normalized
-    has_query_trigger = any(word in normalized for word in trigger_words)
-
+    has_query_trigger = any(w in normalized for w in trigger_words)
     if not has_task_word and normalized not in {"my tasks", "all tasks"}:
         return None
-
     if not has_query_trigger and normalized not in {"my tasks", "all tasks"}:
         return None
-
     priority = None
-
-    if "high priority" in normalized or normalized == "high tasks" or normalized == "high priority tasks":
+    if "high priority" in normalized or normalized in {"high tasks", "high priority tasks"}:
         priority = "high"
-    elif "medium priority" in normalized or normalized == "medium tasks" or normalized == "medium priority tasks":
+    elif "medium priority" in normalized or normalized in {"medium tasks", "medium priority tasks"}:
         priority = "medium"
-    elif "low priority" in normalized or normalized == "low tasks" or normalized == "low priority tasks":
+    elif "low priority" in normalized or normalized in {"low tasks", "low priority tasks"}:
         priority = "low"
-
-    return {
-        "priority": priority
-    }
+    return {"priority": priority}
 
 
-def detect_memory_reference(text: str):
+def detect_memory_reference(text: str) -> bool:
     normalized = normalize_text_for_match(text)
-
-    memory_only_values = {
-        "it",
-        "that",
-        "this",
-        "انجام شد",
-        "تموم شد",
-        "تمام شد"
-    }
-
-    if normalized in memory_only_values:
+    if normalized in {"it", "that", "this", "انجام شد", "تموم شد", "تمام شد"}:
         return True
-
-    if normalized.startswith("it ") or normalized.startswith("that ") or normalized.startswith("this "):
-        return True
-
-    if normalized.endswith(" it") or normalized.endswith(" that") or normalized.endswith(" this"):
-        return True
-
-    if " it " in f" {normalized} ":
-        return True
-
-    if " that " in f" {normalized} ":
-        return True
-
-    if " this " in f" {normalized} ":
-        return True
-
-    return False
+    for marker in ("it ", "that ", "this "):
+        if normalized.startswith(marker):
+            return True
+    for marker in (" it", " that", " this"):
+        if normalized.endswith(marker):
+            return True
+    padded = f" {normalized} "
+    return " it " in padded or " that " in padded or " this " in padded
 
 
-def detect_completion_request(text: str):
+def detect_completion_request(text: str) -> bool:
     normalized = normalize_text_for_match(text)
-
-    exact_matches = {
-        "done",
-        "completed",
-        "complete it",
-        "mark it done",
-        "mark it completed",
-        "finish it",
-        "انجام شد",
-        "تموم شد",
-        "تمام شد",
-        "این انجام شد",
-        "این تموم شد",
-        "این تمام شد"
-    }
-
-    if normalized in exact_matches:
+    exact = {"done", "completed", "complete it", "mark it done", "mark it completed",
+             "finish it", "انجام شد", "تموم شد", "تمام شد",
+             "این انجام شد", "این تموم شد", "این تمام شد"}
+    if normalized in exact:
         return True
-
-    patterns = [
-        "complete it",
-        "mark it done",
-        "mark it completed",
-        "finish it",
-        "done it",
-        "completed it",
-        "انجام شد",
-        "تموم شد",
-        "تمام شد"
-    ]
-
-    for pattern in patterns:
+    for pattern in ["complete it", "mark it done", "mark it completed", "finish it",
+                    "done it", "completed it", "انجام شد", "تموم شد", "تمام شد"]:
         if pattern in normalized:
             return True
-
     return False
 
 
-def build_tasks_list_message(tasks):
+def build_tasks_list_message(tasks) -> str:
     if not tasks:
         return "You have no tasks."
-
     lines = ["Here are your tasks:"]
     for task in tasks:
-        lines.append(
-            f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
-        )
-
+        lines.append(f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}")
     return "\n".join(lines)
 
 
-def build_filtered_tasks_message(tasks, priority: str | None = None):
+def build_filtered_tasks_message(tasks, priority: Optional[str] = None) -> str:
     if not tasks:
-        if priority:
-            return f"You have no {priority} priority tasks right now."
-        return "You have no tasks."
-
-    if priority:
-        lines = [f"Here are your {priority} priority tasks:"]
-    else:
-        lines = ["Here are your tasks:"]
-
+        return f"You have no {priority} priority tasks right now." if priority else "You have no tasks."
+    lines = [f"Here are your {priority} priority tasks:"] if priority else ["Here are your tasks:"]
     for task in tasks:
-        lines.append(
-            f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
-        )
-
+        lines.append(f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}")
     return "\n".join(lines)
 
 
 def get_user_last_task(db, user: User):
     if not user.last_task_id:
         return None
-
-    task = db.query(Task).filter(
-        Task.id == user.last_task_id,
-        Task.user_id == user.id
+    return db.query(Task).filter(
+        Task.id == user.last_task_id, Task.user_id == user.id
     ).first()
 
-    return task
 
-
-def remember_task(db, user: User, task: Task | None):
+def remember_task(db, user: User, task: Optional[Task]):
     if not task:
         return
-
     user.last_task_id = task.id
     db.commit()
     db.refresh(user)
 
 
-def clear_remembered_task(db, user: User, task: Task | None = None):
+def clear_remembered_task(db, user: User, task: Optional[Task] = None):
     if task is not None and user.last_task_id != task.id:
         return
-
     if user.last_task_id is None:
         return
-
     user.last_task_id = None
     db.commit()
     db.refresh(user)
@@ -484,18 +474,16 @@ def mark_task_completed(db, user: User, task: Task):
     return task
 
 
-def build_task_brief(task: Task):
+def build_task_brief(task: Task) -> str:
     return f"#{task.id} - {task.title} | Deadline: {task.deadline} | Priority: {task.priority}"
 
 
-def build_clarify_message_for_tasks(tasks, action_word: str):
+def build_clarify_message_for_tasks(tasks, action_word: str) -> str:
     if not tasks:
         return f"Which task would you like me to {action_word}?"
-
     lines = [f"Which task would you like me to {action_word}?"]
     for task in tasks[:5]:
         lines.append(build_task_brief(task))
-
     return "\n".join(lines)
 
 
@@ -504,60 +492,44 @@ def get_task_by_id_from_list(tasks, task_id):
         normalized_id = int(task_id)
     except (TypeError, ValueError):
         return None
-
     for task in tasks:
         if task.id == normalized_id:
             return task
-
     return None
 
 
-def score_task_match(task: Task, search_text: str):
+def score_task_match(task: Task, search_text: str) -> int:
     normalized_search = normalize_text_for_match(search_text)
-
     if not normalized_search:
         return 0
-
-    search_words = [word for word in normalized_search.split(" ") if word]
+    search_words = [w for w in normalized_search.split(" ") if w]
     if not search_words:
         return 0
-
     title = normalize_text_for_match(task.title)
     deadline = normalize_text_for_match(task.deadline)
     priority = normalize_text_for_match(task.priority)
     status = normalize_text_for_match(task.status or "active")
     task_id_text = str(task.id)
-
     score = 0
-
     if normalized_search == title:
         score += 1000
-
     if normalized_search in title:
         score += 500
-
     if normalized_search == deadline:
         score += 250
-
     if normalized_search in deadline:
         score += 100
-
     if normalized_search == priority:
         score += 100
-
     if normalized_search in priority:
         score += 50
-
     if normalized_search == status:
         score += 50
-
-    if normalized_search == task_id_text or normalized_search == f"#{task_id_text}":
+    if normalized_search in (task_id_text, f"#{task_id_text}"):
         score += 1200
-
     matched_words = 0
-
     for word in search_words:
-        if word == task_id_text or word == f"#{task_id_text}":
+        if word in (task_id_text, f"#{task_id_text}"):
             score += 300
             matched_words += 1
         elif word in title:
@@ -572,128 +544,83 @@ def score_task_match(task: Task, search_text: str):
         elif word in status:
             score += 5
             matched_words += 1
-
     if matched_words == len(search_words):
         score += 200
-
     return score
 
 
 def find_matching_tasks(tasks, user_text: str):
     normalized_search = normalize_text_for_match(user_text)
-
     if not normalized_search:
         return []
-
     scored = []
-
     for task in tasks:
-        score = score_task_match(task, normalized_search)
-        if score > 0:
-            scored.append((score, task.id, task))
-
+        s = score_task_match(task, normalized_search)
+        if s > 0:
+            scored.append((s, task.id, task))
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [item[2] for item in scored]
 
 
 def find_best_task_match(tasks, user_text: str):
     matches = find_matching_tasks(tasks, extract_delete_search_text(user_text))
-
     if not matches:
         return None
-
     if len(matches) == 1:
         return matches[0]
-
-    top_score = score_task_match(matches[0], extract_delete_search_text(user_text))
-    second_score = score_task_match(matches[1], extract_delete_search_text(user_text))
-
-    if top_score == second_score:
-        return None
-
-    return matches[0]
+    top = score_task_match(matches[0], extract_delete_search_text(user_text))
+    second = score_task_match(matches[1], extract_delete_search_text(user_text))
+    return matches[0] if top != second else None
 
 
-def resolve_task_reference(
-    tasks,
-    full_request_text: str,
-    action_item: dict | None = None,
-    remembered_task: Task | None = None,
-    use_memory_reference: bool = False,
-    action_type: str = "update"
-):
+def resolve_task_reference(tasks, full_request_text: str, action_item: Optional[dict] = None,
+                           remembered_task: Optional[Task] = None,
+                           use_memory_reference: bool = False,
+                           action_type: str = "update") -> dict:
     if use_memory_reference and remembered_task:
-        return {
-            "type": "resolved",
-            "task": remembered_task
-        }
-
+        return {"type": "resolved", "task": remembered_task}
     action_item = action_item or {}
-
     ai_task_id = action_item.get("task_id")
     if ai_task_id is not None:
         task_by_id = get_task_by_id_from_list(tasks, ai_task_id)
         if task_by_id:
-            return {
-                "type": "resolved",
-                "task": task_by_id
-            }
-
+            return {"type": "resolved", "task": task_by_id}
     candidate_texts = []
-
     if action_type == "delete":
         candidate_texts.append(extract_delete_search_text(full_request_text))
     elif action_type == "update":
         candidate_texts.append(extract_update_search_text(full_request_text))
     else:
         candidate_texts.append(normalize_text_for_match(full_request_text))
-
     if action_item.get("title"):
         candidate_texts.insert(0, action_item.get("title", ""))
-
     if action_item.get("deadline"):
         candidate_texts.append(action_item.get("deadline", ""))
-
-    checked_texts = []
-    best_matches = []
-
+    checked_texts: list = []
+    best_matches: list = []
     for text_value in candidate_texts:
         normalized = normalize_text_for_match(text_value)
         if not normalized or normalized in checked_texts:
             continue
-
         checked_texts.append(normalized)
         matches = find_matching_tasks(tasks, normalized)
-
         if matches:
             best_matches = matches
             break
-
     if not best_matches:
-        return {
-            "type": "not_found"
-        }
-
+        return {"type": "not_found"}
     if len(best_matches) == 1:
-        return {
-            "type": "resolved",
-            "task": best_matches[0]
-        }
-
+        return {"type": "resolved", "task": best_matches[0]}
     first_score = score_task_match(best_matches[0], checked_texts[0])
     second_score = score_task_match(best_matches[1], checked_texts[0])
-
     if first_score > second_score:
-        return {
-            "type": "resolved",
-            "task": best_matches[0]
-        }
+        return {"type": "resolved", "task": best_matches[0]}
+    return {"type": "ambiguous", "tasks": best_matches[:5]}
 
-    return {
-        "type": "ambiguous",
-        "tasks": best_matches[:5]
-    }
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 def root():
@@ -702,42 +629,45 @@ def root():
 
 @app.get("/health")
 def health():
+    """Liveness probe — always returns ok if the process is up."""
     return {"status": "ok"}
 
 
-@app.post("/auth/signup")
-def signup(request: SignupRequest):
+@app.get("/ready")
+def ready():
+    """Readiness probe — checks the database."""
     db = SessionLocal()
-
     try:
-        email = normalize_email(request.email)
-        password = request.password.strip()
-        name = request.name.strip()
+        db.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
+    finally:
+        db.close()
 
-        existing_user = db.query(User).filter(User.email == email).first()
 
-        if existing_user:
+@app.post("/auth/signup")
+@limiter.limit("5/minute")
+def signup(request: Request, body: SignupRequest):
+    db = SessionLocal()
+    try:
+        email = normalize_email(body.email)
+        password = body.password.strip()
+        name = body.name.strip()
+        if db.query(User).filter(User.email == email).first():
             raise HTTPException(status_code=400, detail="Email already exists")
-
         if len(password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-
         user = User(
             name=name,
             email=email,
             password_hash=hash_password(password),
-            token=None,
-            last_task_id=None
+            last_task_id=None,
         )
-
         db.add(user)
         db.commit()
         db.refresh(user)
-
-        return {
-            "message": "User created successfully",
-            "user": serialize_user(user)
-        }
+        return {"message": "User created successfully", "user": serialize_user(user)}
     except HTTPException:
         raise
     except Exception as error:
@@ -747,34 +677,27 @@ def signup(request: SignupRequest):
 
 
 @app.post("/auth/login")
-def login(request: LoginRequest):
+@limiter.limit("10/minute")
+def login(request: Request, body: LoginRequest):
     db = SessionLocal()
-
     try:
-        email = normalize_email(request.email)
-        password = request.password.strip()
-        password_hash = hash_password(password)
-
+        email = normalize_email(body.email)
+        password = body.password.strip()
         user = db.query(User).filter(User.email == email).first()
-
-        if not user:
+        if not user or not user.password_hash:
             raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        if not user.password_hash:
+        try:
+            verify_password(user.password_hash, password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
             raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        if user.password_hash != password_hash:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        token = secrets.token_hex(24)
-        user.token = token
-        db.commit()
-        db.refresh(user)
-
+        # One-time upgrade: re-hash legacy SHA-256 to Argon2id
+        upgrade_password_if_needed(db, user, password)
+        # Rotate session (delete old, create new)
+        raw_token = create_session(db, user.id)
         return {
             "message": "Login successful",
-            "token": token,
-            "user": serialize_user(user)
+            "token": raw_token,
+            "user": serialize_user(user),
         }
     except HTTPException:
         raise
@@ -785,14 +708,12 @@ def login(request: LoginRequest):
 
 
 @app.post("/auth/logout")
-def logout(authorization: str | None = Header(default=None)):
+def logout(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
-        user.token = None
+        db.query(UserSession).filter(UserSession.user_id == user.id).delete()
         db.commit()
-
         return {"message": "Logged out successfully"}
     except HTTPException:
         raise
@@ -803,16 +724,11 @@ def logout(authorization: str | None = Header(default=None)):
 
 
 @app.get("/auth/me")
-def auth_me(authorization: str | None = Header(default=None)):
+def auth_me(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
-
-        return {
-            "message": "Authenticated user",
-            "user": serialize_user(user)
-        }
+        return {"message": "Authenticated user", "user": serialize_user(user)}
     except HTTPException:
         raise
     except Exception as error:
@@ -822,36 +738,20 @@ def auth_me(authorization: str | None = Header(default=None)):
 
 
 @app.get("/stats")
-def get_stats(authorization: str | None = Header(default=None)):
+def get_stats(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         tasks = get_active_tasks(db, user.id)
-
-        total = len(tasks)
-        high_count = 0
-        medium_count = 0
-        low_count = 0
-
-        for task in tasks:
-            priority = (task.priority or "").lower()
-
-            if priority == "high":
-                high_count += 1
-            elif priority == "medium":
-                medium_count += 1
-            elif priority == "low":
-                low_count += 1
-
-        recent_tasks = [serialize_task(task) for task in tasks[:5]]
-
+        high_count = sum(1 for t in tasks if (t.priority or "").lower() == "high")
+        medium_count = sum(1 for t in tasks if (t.priority or "").lower() == "medium")
+        low_count = sum(1 for t in tasks if (t.priority or "").lower() == "low")
         return {
-            "total_tasks": total,
+            "total_tasks": len(tasks),
             "high_priority_tasks": high_count,
             "medium_priority_tasks": medium_count,
             "low_priority_tasks": low_count,
-            "recent_tasks": recent_tasks
+            "recent_tasks": [serialize_task(t) for t in tasks[:5]],
         }
     except HTTPException:
         raise
@@ -862,18 +762,13 @@ def get_stats(authorization: str | None = Header(default=None)):
 
 
 @app.get("/tasks")
-def get_tasks(authorization: str | None = Header(default=None)):
+def get_tasks(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         tasks = get_active_tasks(db, user.id)
-        result = [serialize_task(task) for task in tasks]
-
-        return {
-            "count": len(result),
-            "tasks": result
-        }
+        result = [serialize_task(t) for t in tasks]
+        return {"count": len(result), "tasks": result}
     except HTTPException:
         raise
     except Exception as error:
@@ -887,36 +782,27 @@ def search_tasks(
     q: str = Query(default=""),
     priority: str = Query(default=""),
     deadline: str = Query(default=""),
-    authorization: str | None = Header(default=None)
+    authorization: Optional[str] = Header(default=None),
 ):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         query = get_active_tasks_query(db, user.id)
-
         if q.strip():
             query = query.filter(
                 or_(
                     Task.title.ilike(f"%{q}%"),
                     Task.deadline.ilike(f"%{q}%"),
-                    Task.priority.ilike(f"%{q}%")
+                    Task.priority.ilike(f"%{q}%"),
                 )
             )
-
         if priority.strip():
             query = query.filter(Task.priority.ilike(priority.strip()))
-
         if deadline.strip():
             query = query.filter(Task.deadline.ilike(f"%{deadline.strip()}%"))
-
         tasks = query.order_by(Task.id.desc()).all()
-        result = [serialize_task(task) for task in tasks]
-
-        return {
-            "count": len(result),
-            "tasks": result
-        }
+        result = [serialize_task(t) for t in tasks]
+        return {"count": len(result), "tasks": result}
     except HTTPException:
         raise
     except Exception as error:
@@ -926,16 +812,13 @@ def search_tasks(
 
 
 @app.get("/tasks/{task_id}")
-def get_task(task_id: int, authorization: str | None = Header(default=None)):
+def get_task(task_id: int, authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
-
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
         return serialize_task(task)
     except HTTPException:
         raise
@@ -946,25 +829,18 @@ def get_task(task_id: int, authorization: str | None = Header(default=None)):
 
 
 @app.delete("/tasks/{task_id}")
-def delete_task(task_id: int, authorization: str | None = Header(default=None)):
+def delete_task(task_id: int, authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
-
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
         deleted_task = serialize_task(task)
         db.delete(task)
         db.commit()
         clear_remembered_task(db, user, task)
-
-        return {
-            "message": "Task deleted successfully",
-            "deleted_task": deleted_task
-        }
+        return {"message": "Task deleted successfully", "deleted_task": deleted_task}
     except HTTPException:
         raise
     except Exception as error:
@@ -974,29 +850,21 @@ def delete_task(task_id: int, authorization: str | None = Header(default=None)):
 
 
 @app.put("/tasks/{task_id}")
-def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | None = Header(default=None)):
+def update_task(task_id: int, body: UpdateTaskRequest, authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
-
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
-        task.title = request.title
-        task.deadline = request.deadline
-        task.priority = request.priority
+        task.title = body.title
+        task.deadline = body.deadline
+        task.priority = body.priority
         task.status = task.status or "active"
-
         db.commit()
         db.refresh(task)
         remember_task(db, user, task)
-
-        return {
-            "message": "Task updated successfully",
-            "task": serialize_task(task)
-        }
+        return {"message": "Task updated successfully", "task": serialize_task(task)}
     except HTTPException:
         raise
     except Exception as error:
@@ -1006,34 +874,28 @@ def update_task(task_id: int, request: UpdateTaskRequest, authorization: str | N
 
 
 @app.post("/tasks/{task_id}/ai-update")
-def ai_update_task(task_id: int, request: UpdateTaskAIRequest, authorization: str | None = Header(default=None)):
+@limiter.limit("20/minute")
+def ai_update_task(request: Request, task_id: int, body: UpdateTaskAIRequest,
+                   authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
-
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
-        prompt = f"""
-You are an AI office assistant.
+        prompt = f"""You are an AI office assistant.
 
 You will update an existing task based on the user's instruction.
-Return ONLY valid JSON.
-Do not include markdown, code fences, or extra text.
+Return ONLY valid JSON. Do not include markdown, code fences, or extra text.
 
 Current task:
 {json.dumps(serialize_task(task))}
 
 User instruction:
-{request.text}
+{body.text}
 
 Rules:
 - Keep the original value if the user did not ask to change it.
-- If the user only changes the deadline, keep title and priority unchanged.
-- If the user only changes the priority, keep title and deadline unchanged.
-- If the user only changes the title, keep deadline and priority unchanged.
 - priority must be one of: low, medium, high
 
 Required JSON format:
@@ -1041,37 +903,21 @@ Required JSON format:
   "title": "updated task title",
   "deadline": "updated deadline or current deadline",
   "priority": "low, medium, or high"
-}}
-"""
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
+}}"""
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
         output_text = response.output_text.strip()
-
         try:
             parsed = json.loads(output_text)
         except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=500,
-                detail="AI response was not valid JSON"
-            )
-
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
         task.title = parsed.get("title", task.title) or task.title
         task.deadline = parsed.get("deadline", task.deadline) or task.deadline
         task.priority = parsed.get("priority", task.priority) or task.priority
         task.status = task.status or "active"
-
         db.commit()
         db.refresh(task)
         remember_task(db, user, task)
-
-        return {
-            "message": "Task updated successfully",
-            "task": serialize_task(task)
-        }
+        return {"message": "Task updated successfully", "task": serialize_task(task)}
     except HTTPException:
         raise
     except Exception as error:
@@ -1081,56 +927,41 @@ Required JSON format:
 
 
 @app.post("/tasks/ai-delete")
-def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Header(default=None)):
+def ai_delete_task(body: DeleteTaskAIRequest, authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         tasks = get_active_tasks(db, user.id)
-
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
-
         remembered_task = get_user_last_task(db, user)
-        use_memory_reference = detect_memory_reference(request.text)
-
+        use_memory_reference = detect_memory_reference(body.text)
         resolved = resolve_task_reference(
             tasks=tasks,
-            full_request_text=request.text,
+            full_request_text=body.text,
             action_item={},
             remembered_task=remembered_task,
             use_memory_reference=use_memory_reference,
-            action_type="delete"
+            action_type="delete",
         )
-
         if resolved["type"] == "not_found":
             raise HTTPException(status_code=404, detail="Task not found")
-
         if resolved["type"] == "ambiguous":
             return {
                 "action": "clarify",
                 "message": build_clarify_message_for_tasks(resolved["tasks"], "delete"),
-                "tasks": [serialize_task(task) for task in resolved["tasks"]]
+                "tasks": [serialize_task(t) for t in resolved["tasks"]],
             }
-
         task = db.query(Task).filter(
-            Task.id == resolved["task"].id,
-            Task.user_id == user.id
+            Task.id == resolved["task"].id, Task.user_id == user.id
         ).first()
-
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
         deleted_task = serialize_task(task)
-
         db.delete(task)
         db.commit()
         clear_remembered_task(db, user, task)
-
-        return {
-            "message": "Task deleted successfully",
-            "deleted_task": deleted_task
-        }
+        return {"message": "Task deleted successfully", "deleted_task": deleted_task}
     except HTTPException:
         raise
     except Exception as error:
@@ -1140,133 +971,98 @@ def ai_delete_task(request: DeleteTaskAIRequest, authorization: str | None = Hea
 
 
 @app.post("/assistant")
-def assistant(request: AssistantRequest, authorization: str | None = Header(default=None)):
-    if not request.text.strip():
+@limiter.limit("30/minute")
+def assistant(request: Request, body: AssistantRequest,
+              authorization: Optional[str] = Header(default=None)):
+    if not body.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
-
     db = SessionLocal()
-
     try:
         user = require_current_user(db, authorization)
         tasks = get_active_tasks(db, user.id)
-        task_list = [serialize_task(task) for task in tasks]
+        task_list = [serialize_task(t) for t in tasks]
         remembered_task = get_user_last_task(db, user)
-        use_memory_reference = detect_memory_reference(request.text)
+        use_memory_reference = detect_memory_reference(body.text)
 
-        if detect_completion_request(request.text):
-            target_task = None
-
-            if remembered_task:
-                target_task = remembered_task
-
+        if detect_completion_request(body.text):
+            target_task = remembered_task
             if not target_task:
-                target_task = find_best_task_match(tasks, extract_complete_search_text(request.text))
-
+                target_task = find_best_task_match(tasks, extract_complete_search_text(body.text))
             if not target_task and len(tasks) == 1:
                 target_task = tasks[0]
-
             if not target_task:
-                return {
-                    "action": "clarify",
-                    "message": "Please tell me which task was completed."
-                }
-
+                return {"action": "clarify", "message": "Please tell me which task was completed."}
             completed_task = mark_task_completed(db, user, target_task)
+            return {"action": "complete", "message": "Task marked as completed",
+                    "task": serialize_task(completed_task)}
 
-            return {
-                "action": "complete",
-                "message": "Task marked as completed",
-                "task": serialize_task(completed_task)
-            }
-
-        tasks_query = detect_tasks_query_request(request.text)
-
+        tasks_query = detect_tasks_query_request(body.text)
         if tasks_query:
             filtered_tasks = tasks
-
             if tasks_query["priority"]:
                 filtered_tasks = [
-                    task for task in tasks
-                    if normalize_text_for_match(task.priority) == tasks_query["priority"]
+                    t for t in tasks
+                    if normalize_text_for_match(t.priority) == tasks_query["priority"]
                 ]
-
             if filtered_tasks:
                 remember_task(db, user, filtered_tasks[0])
-
             return {
                 "action": "list",
-                "message": build_filtered_tasks_message(
-                    filtered_tasks,
-                    tasks_query["priority"]
-                ),
+                "message": build_filtered_tasks_message(filtered_tasks, tasks_query["priority"]),
                 "count": len(filtered_tasks),
-                "tasks": [serialize_task(task) for task in filtered_tasks]
+                "tasks": [serialize_task(t) for t in filtered_tasks],
             }
 
-        if is_show_tasks_request(request.text):
+        if is_show_tasks_request(body.text):
             if tasks:
                 remember_task(db, user, tasks[0])
-
             return {
                 "action": "list",
                 "message": build_tasks_list_message(tasks),
                 "count": len(task_list),
-                "tasks": task_list
+                "tasks": task_list,
             }
 
-        memory_instruction_block = ""
-
+        memory_block = ""
         if remembered_task:
-            memory_instruction_block = f"""
+            memory_block = f"""
 Last remembered task for this user:
 {json.dumps(serialize_task(remembered_task))}
 
 Memory rules:
-- If the user says "it", "that", "this", "delete it", "update it", "make it tomorrow", or similar wording, use the remembered task.
+- If the user says "it", "that", "this", "delete it", "update it", or similar, use the remembered task.
 - When the user's wording clearly refers to the remembered task, return that task_id.
-- Do not ask for clarification if the remembered task makes the request clear enough.
 """
 
-        prompt = f"""
-You are an AI office assistant.
+        prompt = f"""You are an AI office assistant.
 
 Your job is to detect one or more user intents and return ONLY valid JSON.
 Do not include markdown, code fences, or extra text.
 
-Available actions:
-- create
-- update
-- delete
-- clarify
+Available actions: create, update, delete, clarify
 
 Current active task list:
 {json.dumps(task_list)}
 
-{memory_instruction_block}
+{memory_block}
 
 User instruction:
-{request.text}
+{body.text}
 
 Rules:
-- Break the user's instruction into one or more actions when needed.
-- Use clarify if the instruction is ambiguous, unclear, or missing enough information.
-- Use create only when the user wants a brand new task.
+- Break the instruction into one or more actions when needed.
+- Use clarify if ambiguous or missing information.
+- Use create only for a brand new task.
 - Use update only when the user clearly refers to one existing task and wants it changed.
 - Use delete only when the user clearly refers to one existing task and wants it removed.
 - For update and delete, choose exactly one best matching task_id when possible.
-- Prefer exact title match first.
-- If exact match does not exist, allow partial title match only when there is one clear best match.
 - If multiple tasks could match, use clarify.
-- Do not update multiple similar tasks at once.
-- Do not delete multiple similar tasks at once.
-- For create, set task_id to null and return title, deadline, and priority.
-- For update, return the correct task_id and the updated title, deadline, and priority.
-- For delete, return the correct task_id. Title, deadline, and priority can be empty strings.
-- For clarify, set task_id to null and return a short question in clarify_message.
-- Match against the current task list carefully.
+- For create: task_id null, return title, deadline, priority.
+- For update: return task_id and updated title, deadline, priority.
+- For delete: return task_id; title, deadline, priority can be empty strings.
+- For clarify: task_id null, return a short question in clarify_message.
 - priority must be one of: low, medium, high
 - Always return a JSON object with an "actions" array.
-- If there is only one action, still return it inside the actions array.
 
 Required JSON format:
 {{
@@ -1280,29 +1076,16 @@ Required JSON format:
       "clarify_message": "question or empty string"
     }}
   ]
-}}
-"""
+}}"""
 
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
         output_text = response.output_text.strip()
-
         try:
             parsed = json.loads(output_text)
         except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=500,
-                detail="AI response was not valid JSON"
-            )
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
 
-        if isinstance(parsed, list):
-            actions = parsed
-        else:
-            actions = parsed.get("actions", [])
-
+        actions = parsed if isinstance(parsed, list) else parsed.get("actions", [])
         if not actions:
             raise HTTPException(status_code=400, detail="No actions returned by AI")
 
@@ -1316,14 +1099,12 @@ Required JSON format:
                 return {
                     "action": "clarify",
                     "message": item.get("clarify_message", "Please clarify your request."),
-                    "actions": actions
+                    "actions": actions,
                 }
 
         results = []
-
         for item in actions:
             action = item.get("action")
-
             current_tasks = get_active_tasks(db, user.id)
 
             if action == "create":
@@ -1332,134 +1113,80 @@ Required JSON format:
                     deadline=item.get("deadline", "Not specified"),
                     priority=item.get("priority", "medium"),
                     status="active",
-                    user_id=user.id
+                    user_id=user.id,
                 )
                 db.add(db_task)
                 db.commit()
                 db.refresh(db_task)
                 remember_task(db, user, db_task)
-
-                results.append(
-                    {
-                        "action": "create",
-                        "message": "Task created successfully",
-                        "task": serialize_task(db_task)
-                    }
-                )
+                results.append({"action": "create", "message": "Task created successfully",
+                                 "task": serialize_task(db_task)})
 
             elif action == "update":
                 resolved = resolve_task_reference(
-                    tasks=current_tasks,
-                    full_request_text=request.text,
-                    action_item=item,
-                    remembered_task=remembered_task,
-                    use_memory_reference=use_memory_reference,
-                    action_type="update"
+                    tasks=current_tasks, full_request_text=body.text,
+                    action_item=item, remembered_task=remembered_task,
+                    use_memory_reference=use_memory_reference, action_type="update",
                 )
-
                 if resolved["type"] == "not_found":
-                    return {
-                        "action": "clarify",
-                        "message": "Which task would you like me to update?"
-                    }
-
+                    return {"action": "clarify", "message": "Which task would you like me to update?"}
                 if resolved["type"] == "ambiguous":
                     return {
                         "action": "clarify",
                         "message": build_clarify_message_for_tasks(resolved["tasks"], "update"),
-                        "tasks": [serialize_task(task) for task in resolved["tasks"]]
+                        "tasks": [serialize_task(t) for t in resolved["tasks"]],
                     }
-
                 task = db.query(Task).filter(
-                    Task.id == resolved["task"].id,
-                    Task.user_id == user.id
+                    Task.id == resolved["task"].id, Task.user_id == user.id
                 ).first()
-
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
-
-                new_title = item.get("title", "")
-                new_deadline = item.get("deadline", "")
-                new_priority = item.get("priority", "")
-
-                if new_title:
-                    task.title = new_title
-
-                if new_deadline:
-                    task.deadline = new_deadline
-
-                if new_priority:
-                    task.priority = new_priority
-
+                if item.get("title"):
+                    task.title = item["title"]
+                if item.get("deadline"):
+                    task.deadline = item["deadline"]
+                if item.get("priority"):
+                    task.priority = item["priority"]
                 task.status = task.status or "active"
-
                 db.commit()
                 db.refresh(task)
                 remember_task(db, user, task)
-
-                results.append(
-                    {
-                        "action": "update",
-                        "message": "Task updated successfully",
-                        "task": serialize_task(task)
-                    }
-                )
+                results.append({"action": "update", "message": "Task updated successfully",
+                                 "task": serialize_task(task)})
 
             elif action == "delete":
                 resolved = resolve_task_reference(
-                    tasks=current_tasks,
-                    full_request_text=request.text,
-                    action_item=item,
-                    remembered_task=remembered_task,
-                    use_memory_reference=use_memory_reference,
-                    action_type="delete"
+                    tasks=current_tasks, full_request_text=body.text,
+                    action_item=item, remembered_task=remembered_task,
+                    use_memory_reference=use_memory_reference, action_type="delete",
                 )
-
                 if resolved["type"] == "not_found":
-                    return {
-                        "action": "clarify",
-                        "message": "Which task would you like me to delete?"
-                    }
-
+                    return {"action": "clarify", "message": "Which task would you like me to delete?"}
                 if resolved["type"] == "ambiguous":
                     return {
                         "action": "clarify",
                         "message": build_clarify_message_for_tasks(resolved["tasks"], "delete"),
-                        "tasks": [serialize_task(task) for task in resolved["tasks"]]
+                        "tasks": [serialize_task(t) for t in resolved["tasks"]],
                     }
-
                 task = db.query(Task).filter(
-                    Task.id == resolved["task"].id,
-                    Task.user_id == user.id
+                    Task.id == resolved["task"].id, Task.user_id == user.id
                 ).first()
-
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
-
                 deleted_task = serialize_task(task)
-
                 db.delete(task)
                 db.commit()
                 clear_remembered_task(db, user, task)
-
-                results.append(
-                    {
-                        "action": "delete",
-                        "message": "Task deleted successfully",
-                        "task": deleted_task
-                    }
-                )
+                results.append({"action": "delete", "message": "Task deleted successfully",
+                                 "task": deleted_task})
 
             else:
                 raise HTTPException(status_code=400, detail="Invalid action returned by AI")
 
         if len(results) == 1:
             return results[0]
+        return {"message": "Multiple actions completed successfully", "results": results}
 
-        return {
-            "message": "Multiple actions completed successfully",
-            "results": results
-        }
     except HTTPException:
         raise
     except Exception as error:
@@ -1469,12 +1196,18 @@ Required JSON format:
 
 
 @app.post("/analyze")
-def analyze(request: EmailRequest, authorization: str | None = Header(default=None)):
-    if not request.text.strip():
+@limiter.limit("20/minute")
+def analyze(request: Request, body: EmailRequest,
+            authorization: Optional[str] = Header(default=None)):
+    if not body.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
 
-    prompt = f"""
-You are an AI office assistant.
+    # Authentication required before any model call (row 35 model-route gate)
+    db = SessionLocal()
+    try:
+        user = require_current_user(db, authorization)
+
+        prompt = f"""You are an AI office assistant.
 
 Analyze the email below and return ONLY valid JSON.
 Do not include markdown, code fences, or extra text.
@@ -1492,49 +1225,34 @@ Required JSON format:
 }}
 
 Email:
-{request.text}
-"""
+{body.text}"""
 
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt
-    )
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        output_text = response.output_text.strip()
+        try:
+            parsed = json.loads(output_text)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
 
-    output_text = response.output_text.strip()
-
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=500,
-            detail="AI response was not valid JSON"
-        )
-
-    db = SessionLocal()
-
-    try:
-        user = require_current_user(db, authorization)
         saved_tasks = []
-
         for task in parsed.get("tasks", []):
             db_task = Task(
                 title=task.get("title", ""),
                 deadline=task.get("deadline", "Not specified"),
                 priority=task.get("priority", "medium"),
                 status="active",
-                user_id=user.id
+                user_id=user.id,
             )
             db.add(db_task)
             db.commit()
             db.refresh(db_task)
             remember_task(db, user, db_task)
-
             saved_tasks.append(serialize_task(db_task))
 
         return {
-            "original_text": request.text,
+            "original_text": body.text,
             "summary": parsed.get("summary", ""),
-            "created_tasks": saved_tasks
+            "created_tasks": saved_tasks,
         }
     except HTTPException:
         raise

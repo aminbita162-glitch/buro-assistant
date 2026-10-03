@@ -38,14 +38,14 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 28 | Dead-letter queue and replay | Phase 8 | — |
 | 29 | Priority lanes | Phase 8 | — |
 | 30 | Traces around ingest, decide, draft, and send | Phase 8 | — |
-| 31 | Live and ready health checks; ready checks the database | Phase 2 | — |
+| 31 | Live and ready health checks; ready checks the database | ✓ Phase 2 | ✓ Phase 2 |
 | 32 | Alembic migrations; no schema change on import | Phase 3 | — |
-| 33 | Argon2id password hashes with one-time legacy SHA-256 verification | Phase 2 | — |
-| 34 | Session table, hashed token, expiry, rotation on login | Phase 2 | — |
-| 35 | Rate limits on signup, login, and model routes | Phase 2 | — |
-| 36 | Security headers and a content security policy | Phase 2 | — |
-| 37 | CORS allowlist from the environment | Phase 2 | — |
-| 38 | Message and task fields rendered as text, not HTML | Phase 2 | — |
+| 33 | Argon2id password hashes with one-time legacy SHA-256 verification | ✓ Phase 2 | ✓ Phase 2 |
+| 34 | Session table, hashed token, expiry, rotation on login | ✓ Phase 2 | ✓ Phase 2 |
+| 35 | Rate limits on signup, login, and model routes | ✓ Phase 2 | ✓ Phase 2 |
+| 36 | Security headers and a content security policy | ✓ Phase 2 | ✓ Phase 2 |
+| 37 | CORS allowlist from the environment | ✓ Phase 2 | ✓ Phase 2 |
+| 38 | Message and task fields rendered as text, not HTML | ✓ Phase 2 | ✓ Phase 2 |
 | 39 | Capability matrix with Designed for and Verified columns | ✓ Phase 1 | ✓ Phase 1 |
 | 40 | Usage events | Phase 9 | — |
 | 41 | Tenant data export job | Phase 9 | — |
