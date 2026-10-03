@@ -10,16 +10,16 @@ This matrix lists every capability defined in the release checklist. The **Desig
 |---|---|---|---|
 | 1 | Tenant on every business table | ✓ Phase 3 | ✓ Phase 3 |
 | 2 | Tests that reject cross-tenant reads | ✓ Phase 3 | ✓ Phase 3 |
-| 3 | Idempotency key of provider message id plus tenant | Phase 4 | — |
-| 4 | Immutable stored raw message | Phase 4 | — |
-| 5 | IMAP adapter, credentials only from environment | Phase 4 | — |
-| 6 | Provider-neutral normalized message | Phase 4 | — |
+| 3 | Idempotency key of provider message id plus tenant | ✓ Phase 4 | ✓ Phase 4 |
+| 4 | Immutable stored raw message | ✓ Phase 4 | ✓ Phase 4 |
+| 5 | IMAP adapter, credentials only from environment | ✓ Phase 4 | ✓ Phase 4 |
+| 6 | Provider-neutral normalized message | ✓ Phase 4 | ✓ Phase 4 |
 | 7 | Tenant rule pack for domain, subject, and department | Phase 5 | — |
 | 8 | Confidence threshold; below threshold goes to Supervisor | Phase 5 | — |
-| 9 | Duplicate detection by Message-Id and normalized subject | Phase 4 | — |
+| 9 | Duplicate detection by Message-Id and normalized subject | ✓ Phase 4 | ✓ Phase 4 |
 | 10 | Language detection by library first | Phase 5 | — |
 | 11 | Urgency lexicon with tenant overrides | Phase 5 | — |
-| 12 | Attachment allowlist and quarantine state | Phase 4 | — |
+| 12 | Attachment allowlist and quarantine state | ✓ Phase 4 | ✓ Phase 4 |
 | 13 | Redaction before any model call | Phase 5 | — |
 | 14 | Prompt and schema version stored on each decision | Phase 5 | — |
 | 15 | Schema validation of agent output | Phase 5 | — |

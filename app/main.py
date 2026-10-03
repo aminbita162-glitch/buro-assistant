@@ -196,6 +196,24 @@ class AssistantRequest(BaseModel):
     text: str
 
 
+class IngestRequest(BaseModel):
+    """
+    Payload for POST /ingest.
+
+    Fields mirror NormalizedMessage so callers (workers, tests) can POST
+    a message directly without going through a live mail provider.
+    """
+    provider: str
+    provider_message_id: str
+    message_id_header: Optional[str] = None
+    subject: str
+    sender: str
+    recipients: list = []
+    body_text: str = ""
+    attachments: list = []   # list of {filename, content_type, size_bytes}
+    raw: dict = {}
+
+
 class SignupRequest(BaseModel):
     name: str
     email: EmailStr
@@ -1280,6 +1298,66 @@ Email:
             "original_text": body.text,
             "summary": parsed.get("summary", ""),
             "created_tasks": saved_tasks,
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(error))
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Ingest route (Phase 4)
+# ---------------------------------------------------------------------------
+
+@app.post("/ingest")
+def ingest(body: IngestRequest, authorization: Optional[str] = Header(default=None)):
+    """
+    Accept a normalised message payload, run duplicate/idempotency/quarantine
+    checks, and store the raw message.  Returns the stored record and result.
+
+    Authentication required.  The authenticated user's tenant_id is used as
+    the ingest tenant.
+    """
+    from app.ingest.ingest import ingest_message
+    from app.ingest.normalize import Attachment, NormalizedMessage
+
+    db = SessionLocal()
+    try:
+        user = require_current_user(db, authorization)
+
+        attachments = [
+            Attachment(
+                filename=a.get("filename", ""),
+                content_type=a.get("content_type", "application/octet-stream"),
+                size_bytes=int(a.get("size_bytes", 0)),
+            )
+            for a in (body.attachments or [])
+        ]
+
+        msg = NormalizedMessage(
+            provider=body.provider,
+            provider_message_id=body.provider_message_id,
+            tenant_id=user.tenant_id,
+            message_id_header=body.message_id_header,
+            subject=body.subject,
+            subject_normalized=NormalizedMessage.normalize_subject(body.subject),
+            sender=body.sender,
+            recipients=body.recipients,
+            body_text=body.body_text,
+            attachments=attachments,
+            raw=body.raw or {},
+        )
+
+        record, result = ingest_message(db, msg)
+
+        return {
+            "result": result,
+            "message_id": record.id,
+            "state": record.state,
+            "attachment_state": record.attachment_state,
+            "ingest_time": record.ingest_time.isoformat(),
         }
     except HTTPException:
         raise

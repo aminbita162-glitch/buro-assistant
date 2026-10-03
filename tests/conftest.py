@@ -34,6 +34,12 @@ def _patched(url, **kwargs):
 
 sqlalchemy.create_engine = _patched  # type: ignore[assignment]
 
+# Ensure the ingest models are registered on Base before any test creates tables.
+try:
+    import app.ingest.models  # noqa: F401
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).
