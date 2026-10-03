@@ -14,15 +14,15 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 4 | Immutable stored raw message | ✓ Phase 4 | ✓ Phase 4 |
 | 5 | IMAP adapter, credentials only from environment | ✓ Phase 4 | ✓ Phase 4 |
 | 6 | Provider-neutral normalized message | ✓ Phase 4 | ✓ Phase 4 |
-| 7 | Tenant rule pack for domain, subject, and department | Phase 5 | — |
-| 8 | Confidence threshold; below threshold goes to Supervisor | Phase 5 | — |
+| 7 | Tenant rule pack for domain, subject, and department | ✓ Phase 5 | ✓ Phase 5 |
+| 8 | Confidence threshold; below threshold goes to Supervisor | ✓ Phase 5 | ✓ Phase 5 |
 | 9 | Duplicate detection by Message-Id and normalized subject | ✓ Phase 4 | ✓ Phase 4 |
-| 10 | Language detection by library first | Phase 5 | — |
-| 11 | Urgency lexicon with tenant overrides | Phase 5 | — |
+| 10 | Language detection by library first | ✓ Phase 5 | ✓ Phase 5 |
+| 11 | Urgency lexicon with tenant overrides | ✓ Phase 5 | ✓ Phase 5 |
 | 12 | Attachment allowlist and quarantine state | ✓ Phase 4 | ✓ Phase 4 |
-| 13 | Redaction before any model call | Phase 5 | — |
-| 14 | Prompt and schema version stored on each decision | Phase 5 | — |
-| 15 | Schema validation of agent output | Phase 5 | — |
+| 13 | Redaction before any model call | ✓ Phase 5 | ✓ Phase 5 |
+| 14 | Prompt and schema version stored on each decision | ✓ Phase 5 | ✓ Phase 5 |
+| 15 | Schema validation of agent output | ✓ Phase 5 | ✓ Phase 5 |
 | 16 | Template registry with variables and forbidden phrases | Phase 6 | — |
 | 17 | Auto-reply off unless tenant turns it on | Phase 6 | — |
 | 18 | Receipt template stating message was received and will be reviewed | Phase 6 | — |
@@ -53,8 +53,8 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 43 | Sandbox tenant seed command | Phase 9 | — |
 | 44 | Scoped API keys, stored hashed | Phase 9 | — |
 | 45 | Signed outbound webhooks | Phase 9 | — |
-| 46 | Fifty synthetic golden messages with expected decisions | Phase 5 | — |
-| 47 | Contract tests for the three schemas | Phase 5 | — |
+| 46 | Fifty synthetic golden messages with expected decisions | ✓ Phase 5 | ✓ Phase 5 |
+| 47 | Contract tests for the three schemas | ✓ Phase 5 | ✓ Phase 5 |
 | 48 | Shadow mode that stores a draft and does not send | Phase 6 | — |
 | 49 | Runbook for incident, quota breach, and bad template | Phase 10 | — |
 | 50 | Install, backup, restore, threat model, and release notes | Phase 10 | — |

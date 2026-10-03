@@ -40,6 +40,15 @@ try:
 except Exception:
     pass
 
+# Ensure agent modules are importable (they do not define ORM models but
+# import app.main which may not yet be imported in some test orderings).
+try:
+    import app.agents.amin      # noqa: F401
+    import app.agents.amilos    # noqa: F401
+    import app.agents.leila     # noqa: F401
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).

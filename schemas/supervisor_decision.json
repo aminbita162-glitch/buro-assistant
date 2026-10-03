@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "supervisor_decision.json",
+  "title": "SupervisorDecision",
+  "description": "Output of the Leila supervisor agent. Allowed values are hold, request_human, reject, reroute.",
+  "version": "1",
+  "type": "object",
+  "required": ["schema_version", "prompt_version", "action", "reason", "decision_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "prompt_version": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string",
+      "enum": ["hold", "request_human", "reject", "reroute"],
+      "description": "Supervisor can hold, request human review, reject, or reroute. Cannot send or delete."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Machine-readable reason code, e.g. \"low_confidence\", \"schema_invalid\", \"rule_exception\"."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Optional human-readable detail."
+    },
+    "reroute_department": {
+      "type": ["string", "null"],
+      "description": "Target department when action is reroute; null otherwise."
+    },
+    "decision_hash": {
+      "type": "string",
+      "description": "Deterministic hash of the exception context."
+    }
+  }
+}

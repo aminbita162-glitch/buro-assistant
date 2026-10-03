@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "triage_decision.json",
+  "title": "TriageDecision",
+  "description": "Output of the Amin triage controller. Version stored on every decision (row 14).",
+  "version": "1",
+  "type": "object",
+  "required": ["schema_version", "prompt_version", "department", "language", "urgency", "confidence", "rule_hit", "action", "decision_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Semver of this schema, e.g. \"1\"."
+    },
+    "prompt_version": {
+      "type": "string",
+      "description": "Opaque string identifying the prompt template used."
+    },
+    "department": {
+      "type": "string",
+      "description": "Resolved department slug, e.g. \"billing\", \"support\", \"hr\"."
+    },
+    "language": {
+      "type": "string",
+      "description": "ISO 639-1 language code detected in the message body."
+    },
+    "urgency": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "Urgency level after lexicon scoring."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Model confidence; below threshold routes to Supervisor (row 8)."
+    },
+    "rule_hit": {
+      "type": ["string", "null"],
+      "description": "Name of the rule that fired, or null if a model call was made."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["draft_reply", "hold", "forward", "reject", "escalate"],
+      "description": "Decided action for the message."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason for the decision."
+    },
+    "decision_hash": {
+      "type": "string",
+      "description": "Deterministic SHA-256 hex of (tenant_rules, subject_normalized, rule_hit, action). Same input always produces the same hash (row 14)."
+    }
+  }
+}

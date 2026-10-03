@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "reply_draft.json",
+  "title": "ReplyDraft",
+  "description": "Output of the Amilos reply agent. Version stored on every decision (row 14).",
+  "version": "1",
+  "type": "object",
+  "required": ["schema_version", "prompt_version", "template_id", "subject", "body", "decision_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Semver of this schema."
+    },
+    "prompt_version": {
+      "type": "string",
+      "description": "Opaque string identifying the prompt template used."
+    },
+    "template_id": {
+      "type": "string",
+      "description": "ID of the approved template used to generate this draft."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Reply subject line."
+    },
+    "body": {
+      "type": "string",
+      "description": "Plain-text reply body. Must not contain invented prices, legal promises, or dates not in template variables."
+    },
+    "language": {
+      "type": "string",
+      "description": "ISO 639-1 code of the reply language."
+    },
+    "decision_hash": {
+      "type": "string",
+      "description": "Deterministic hash tying this draft to the triage decision that triggered it."
+    }
+  }
+}
