@@ -21,7 +21,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, or_, text, inspect
+from sqlalchemy import (
+    create_engine, Column, Integer, String, DateTime, ForeignKey, or_, text, inspect,
+)
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import OperationalError
 
@@ -50,10 +52,19 @@ Base = declarative_base()
 SESSION_TTL_HOURS = 24
 
 
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    slug = Column(String, nullable=False, unique=True, index=True)
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     name = Column(String)
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
@@ -64,7 +75,8 @@ class UserSession(Base):
     __tablename__ = "user_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     token_hash = Column(String, unique=True, index=True, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
 
@@ -73,34 +85,35 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     title = Column(String)
     deadline = Column(String)
     priority = Column(String)
     status = Column(String, nullable=True)
-    user_id = Column(Integer, index=True, nullable=True)
 
 
 # ---------------------------------------------------------------------------
-# Schema bootstrap (pre-Alembic; removed in Phase 3 when Alembic takes over)
+# Schema — managed by Alembic only.  No create_all or ALTER TABLE here.
+# The startup function below runs "alembic upgrade head" once so existing
+# databases are migrated automatically when the process starts.
 # ---------------------------------------------------------------------------
 
-Base.metadata.create_all(bind=engine)
+def _run_migrations() -> None:
+    """Apply pending Alembic migrations at startup."""
+    from alembic.config import Config
+    from alembic import command as alembic_command
+    cfg = Config("alembic.ini")
+    alembic_command.upgrade(cfg, "head")
 
 
-def _ensure_column(table: str, column: str, col_type: str):
-    inspector = inspect(engine)
-    cols = [c["name"] for c in inspector.get_columns(table)]
-    if column not in cols:
-        with engine.begin() as conn:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
-
-
-_ensure_column("tasks", "user_id", "INTEGER")
-_ensure_column("tasks", "status", "VARCHAR")
-# Legacy token column removed from users; sessions table takes over.
-# Keep the column present so existing rows aren't broken until Phase 3 migration.
-_ensure_column("users", "token", "VARCHAR")
-_ensure_column("users", "last_task_id", "INTEGER")
+try:
+    _run_migrations()
+except Exception as _mig_err:  # noqa: BLE001
+    # Log but do not crash — the process still starts; the operator can
+    # run `alembic upgrade head` manually if the DB is not reachable yet.
+    import logging as _logging
+    _logging.getLogger(__name__).warning("Alembic startup migration failed: %s", _mig_err)
 
 # ---------------------------------------------------------------------------
 # OpenAI client
@@ -238,12 +251,13 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_session(db, user_id: int) -> str:
+def create_session(db, user_id: int, tenant_id: int) -> str:
     """Create a new session; rotate (delete all old sessions first)."""
     db.query(UserSession).filter(UserSession.user_id == user_id).delete()
     raw_token = secrets.token_hex(32)
     session = UserSession(
         user_id=user_id,
+        tenant_id=tenant_id,
         token_hash=_token_hash(raw_token),
         expires_at=datetime.now(timezone.utc) + timedelta(hours=SESSION_TTL_HOURS),
     )
@@ -314,16 +328,17 @@ def normalize_text_for_match(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
-def get_active_tasks_query(db, user_id: int):
+def get_active_tasks_query(db, user_id: int, tenant_id: int):
     return (
         db.query(Task)
+        .filter(Task.tenant_id == tenant_id)
         .filter(Task.user_id == user_id)
         .filter(or_(Task.status.is_(None), Task.status != "completed"))
     )
 
 
-def get_active_tasks(db, user_id: int):
-    return get_active_tasks_query(db, user_id).order_by(Task.id.desc()).all()
+def get_active_tasks(db, user_id: int, tenant_id: int):
+    return get_active_tasks_query(db, user_id, tenant_id).order_by(Task.id.desc()).all()
 
 
 def extract_delete_search_text(text: str) -> str:
@@ -444,7 +459,9 @@ def get_user_last_task(db, user: User):
     if not user.last_task_id:
         return None
     return db.query(Task).filter(
-        Task.id == user.last_task_id, Task.user_id == user.id
+        Task.id == user.last_task_id,
+        Task.tenant_id == user.tenant_id,
+        Task.user_id == user.id,
     ).first()
 
 
@@ -658,7 +675,15 @@ def signup(request: Request, body: SignupRequest):
             raise HTTPException(status_code=400, detail="Email already exists")
         if len(password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        # Resolve or create the default tenant for self-service signup.
+        tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
+        if not tenant:
+            tenant = Tenant(name="Default", slug="default")
+            db.add(tenant)
+            db.commit()
+            db.refresh(tenant)
         user = User(
+            tenant_id=tenant.id,
             name=name,
             email=email,
             password_hash=hash_password(password),
@@ -693,7 +718,7 @@ def login(request: Request, body: LoginRequest):
         # One-time upgrade: re-hash legacy SHA-256 to Argon2id
         upgrade_password_if_needed(db, user, password)
         # Rotate session (delete old, create new)
-        raw_token = create_session(db, user.id)
+        raw_token = create_session(db, user.id, user.tenant_id)
         return {
             "message": "Login successful",
             "token": raw_token,
@@ -742,7 +767,7 @@ def get_stats(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        tasks = get_active_tasks(db, user.id)
+        tasks = get_active_tasks(db, user.id, user.tenant_id)
         high_count = sum(1 for t in tasks if (t.priority or "").lower() == "high")
         medium_count = sum(1 for t in tasks if (t.priority or "").lower() == "medium")
         low_count = sum(1 for t in tasks if (t.priority or "").lower() == "low")
@@ -766,7 +791,7 @@ def get_tasks(authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        tasks = get_active_tasks(db, user.id)
+        tasks = get_active_tasks(db, user.id, user.tenant_id)
         result = [serialize_task(t) for t in tasks]
         return {"count": len(result), "tasks": result}
     except HTTPException:
@@ -787,7 +812,7 @@ def search_tasks(
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        query = get_active_tasks_query(db, user.id)
+        query = get_active_tasks_query(db, user.id, user.tenant_id)
         if q.strip():
             query = query.filter(
                 or_(
@@ -816,7 +841,7 @@ def get_task(task_id: int, authorization: Optional[str] = Header(default=None)):
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+        task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == user.tenant_id, Task.user_id == user.id).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         return serialize_task(task)
@@ -833,7 +858,7 @@ def delete_task(task_id: int, authorization: Optional[str] = Header(default=None
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+        task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == user.tenant_id, Task.user_id == user.id).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         deleted_task = serialize_task(task)
@@ -854,7 +879,7 @@ def update_task(task_id: int, body: UpdateTaskRequest, authorization: Optional[s
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+        task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == user.tenant_id, Task.user_id == user.id).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         task.title = body.title
@@ -880,7 +905,7 @@ def ai_update_task(request: Request, task_id: int, body: UpdateTaskAIRequest,
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+        task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == user.tenant_id, Task.user_id == user.id).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         prompt = f"""You are an AI office assistant.
@@ -931,7 +956,7 @@ def ai_delete_task(body: DeleteTaskAIRequest, authorization: Optional[str] = Hea
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        tasks = get_active_tasks(db, user.id)
+        tasks = get_active_tasks(db, user.id, user.tenant_id)
         if not tasks:
             raise HTTPException(status_code=404, detail="No tasks found")
         remembered_task = get_user_last_task(db, user)
@@ -953,7 +978,7 @@ def ai_delete_task(body: DeleteTaskAIRequest, authorization: Optional[str] = Hea
                 "tasks": [serialize_task(t) for t in resolved["tasks"]],
             }
         task = db.query(Task).filter(
-            Task.id == resolved["task"].id, Task.user_id == user.id
+            Task.id == resolved["task"].id, Task.tenant_id == user.tenant_id, Task.user_id == user.id
         ).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -979,7 +1004,7 @@ def assistant(request: Request, body: AssistantRequest,
     db = SessionLocal()
     try:
         user = require_current_user(db, authorization)
-        tasks = get_active_tasks(db, user.id)
+        tasks = get_active_tasks(db, user.id, user.tenant_id)
         task_list = [serialize_task(t) for t in tasks]
         remembered_task = get_user_last_task(db, user)
         use_memory_reference = detect_memory_reference(body.text)
@@ -1105,15 +1130,16 @@ Required JSON format:
         results = []
         for item in actions:
             action = item.get("action")
-            current_tasks = get_active_tasks(db, user.id)
+            current_tasks = get_active_tasks(db, user.id, user.tenant_id)
 
             if action == "create":
                 db_task = Task(
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
                     title=item.get("title", ""),
                     deadline=item.get("deadline", "Not specified"),
                     priority=item.get("priority", "medium"),
                     status="active",
-                    user_id=user.id,
                 )
                 db.add(db_task)
                 db.commit()
@@ -1137,7 +1163,7 @@ Required JSON format:
                         "tasks": [serialize_task(t) for t in resolved["tasks"]],
                     }
                 task = db.query(Task).filter(
-                    Task.id == resolved["task"].id, Task.user_id == user.id
+                    Task.id == resolved["task"].id, Task.tenant_id == user.tenant_id, Task.user_id == user.id
                 ).first()
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
@@ -1169,7 +1195,7 @@ Required JSON format:
                         "tasks": [serialize_task(t) for t in resolved["tasks"]],
                     }
                 task = db.query(Task).filter(
-                    Task.id == resolved["task"].id, Task.user_id == user.id
+                    Task.id == resolved["task"].id, Task.tenant_id == user.tenant_id, Task.user_id == user.id
                 ).first()
                 if not task:
                     raise HTTPException(status_code=404, detail="Task not found")
@@ -1237,11 +1263,12 @@ Email:
         saved_tasks = []
         for task in parsed.get("tasks", []):
             db_task = Task(
+                tenant_id=user.tenant_id,
+                user_id=user.id,
                 title=task.get("title", ""),
                 deadline=task.get("deadline", "Not specified"),
                 priority=task.get("priority", "medium"),
                 status="active",
-                user_id=user.id,
             )
             db.add(db_task)
             db.commit()

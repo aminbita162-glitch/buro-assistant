@@ -9,3 +9,4 @@ argon2-cffi==25.1.0
 slowapi==0.1.10
 limits==4.2
 httpx==0.28.1
+alembic==1.16.5

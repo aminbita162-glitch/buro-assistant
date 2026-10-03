@@ -8,8 +8,8 @@ This matrix lists every capability defined in the release checklist. The **Desig
 
 | # | Capability | Designed for | Verified |
 |---|---|---|---|
-| 1 | Tenant on every business table | Phase 3 | — |
-| 2 | Tests that reject cross-tenant reads | Phase 3 | — |
+| 1 | Tenant on every business table | ✓ Phase 3 | ✓ Phase 3 |
+| 2 | Tests that reject cross-tenant reads | ✓ Phase 3 | ✓ Phase 3 |
 | 3 | Idempotency key of provider message id plus tenant | Phase 4 | — |
 | 4 | Immutable stored raw message | Phase 4 | — |
 | 5 | IMAP adapter, credentials only from environment | Phase 4 | — |
@@ -39,7 +39,7 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 29 | Priority lanes | Phase 8 | — |
 | 30 | Traces around ingest, decide, draft, and send | Phase 8 | — |
 | 31 | Live and ready health checks; ready checks the database | ✓ Phase 2 | ✓ Phase 2 |
-| 32 | Alembic migrations; no schema change on import | Phase 3 | — |
+| 32 | Alembic migrations; no schema change on import | ✓ Phase 3 | ✓ Phase 3 |
 | 33 | Argon2id password hashes with one-time legacy SHA-256 verification | ✓ Phase 2 | ✓ Phase 2 |
 | 34 | Session table, hashed token, expiry, rotation on login | ✓ Phase 2 | ✓ Phase 2 |
 | 35 | Rate limits on signup, login, and model routes | ✓ Phase 2 | ✓ Phase 2 |

@@ -21,6 +21,7 @@ from app.main import (  # noqa: E402
     Base,
     engine,
     SessionLocal,
+    Tenant,
     User,
     UserSession,
     hash_password,
@@ -58,11 +59,30 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
-def _make_user(name="Alice", email="alice@example.com", password="secret99"):
-    """Insert a user with an Argon2id hash and return (user, raw_password)."""
+def _ensure_tenant(slug="test", name="Test Tenant") -> int:
+    """Return the id of a tenant, creating it if absent."""
     db = SessionLocal()
     try:
-        u = User(name=name, email=email, password_hash=hash_password(password))
+        t = db.query(Tenant).filter(Tenant.slug == slug).first()
+        if not t:
+            t = Tenant(name=name, slug=slug)
+            db.add(t)
+            db.commit()
+            db.refresh(t)
+        return t.id
+    finally:
+        db.close()
+
+
+def _make_user(name="Alice", email="alice@example.com", password="secret99",
+               tenant_id=None):
+    """Insert a user with an Argon2id hash and return (user, raw_password)."""
+    if tenant_id is None:
+        tenant_id = _ensure_tenant()
+    db = SessionLocal()
+    try:
+        u = User(tenant_id=tenant_id, name=name, email=email,
+                 password_hash=hash_password(password))
         db.add(u)
         db.commit()
         db.refresh(u)
@@ -73,9 +93,10 @@ def _make_user(name="Alice", email="alice@example.com", password="secret99"):
 
 def _make_legacy_user(name="Bob", email="bob@example.com", password="legacy123"):
     """Insert a user with a legacy SHA-256 hash."""
+    tenant_id = _ensure_tenant()
     db = SessionLocal()
     try:
-        u = User(name=name, email=email,
+        u = User(tenant_id=tenant_id, name=name, email=email,
                  password_hash=_sha256_hex(password))
         db.add(u)
         db.commit()
@@ -242,9 +263,10 @@ class TestSessions:
             db.close()
 
     def test_expired_session_rejected(self):
+        tenant_id = _ensure_tenant()
         db = SessionLocal()
         try:
-            u = User(name="Eve", email="eve@example.com",
+            u = User(tenant_id=tenant_id, name="Eve", email="eve@example.com",
                      password_hash=hash_password("pw"))
             db.add(u)
             db.commit()
@@ -252,6 +274,7 @@ class TestSessions:
             # Insert an already-expired session
             raw = "expiredtoken123"
             s = UserSession(
+                tenant_id=tenant_id,
                 user_id=u.id,
                 token_hash=_token_hash(raw),
                 expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
