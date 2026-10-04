@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Phase 6 (Desk signals)
+**Last updated:** Phase 7 (Air-gap package)
 
 ---
 
@@ -48,6 +48,7 @@ run.
 | 20 | 2026-10-20 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 4 — OAuth mailbox boundary) | 779 passed, 0 failed | OAuth mailbox boundary — 17 new tests |
 | 21 | 2026-10-21 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 5 — audit hash chain) | 797 passed, 0 failed | Audit hash chain — 18 new tests |
 | 22 | 2026-10-22 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 6 — desk signals) | 842 passed, 0 failed | Desk signals — 45 new tests |
+| 23 | 2026-10-23 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 7 — air-gap package) | 856 passed, 0 failed | Air-gap package — 14 new tests |
 
 ---
 
@@ -101,6 +102,7 @@ recorded here.
 | `tests/test_oauth_mailbox.py` | OAuth mailbox port: OAuthMailboxPort interface, FakeOAuthProvider, factory selection (tokens absent → fake, partial env → fake, app still runs) | Phase 4 |
 | `tests/test_audit_hash_chain.py` | Audit hash chain: prev_hash write, ZERO_HASH sentinel, verify_chain (intact and broken), pre-chain NULL rows excluded, tenant isolation | Phase 5 |
 | `tests/test_desk_signals.py` | Desk signals: daily digest shadow, semantic duplicate flag, attachment text extraction, dissatisfied-tone flag routing to Leila | Phase 6 |
+| `tests/test_air_gap.py` | Air-gap package: compose file exists, names no secret (OPENAI_API_KEY, GATEWAY_SECRET, IMAP_PASSWORD, sk-... pattern), LOCAL_MODEL set, operator-hosted statement, structural checks | Phase 7 |
 
 ---
 

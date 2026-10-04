@@ -223,6 +223,31 @@ Full matrix: [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md)
 
 ---
 
+## Air-gap package (operator-hosted)
+
+Buro Assistant ships a `docker-compose.yml` for fully operator-hosted deployment
+with **no cloud model** and **no gateway secret**.
+
+```bash
+docker compose up
+```
+
+The compose file starts:
+
+- A PostgreSQL 16 database (`db` service, data in a named volume).
+- The application (`app` service) with `LOCAL_MODEL=1` so the cloud model
+  client is never called — `FakeModel` is used for all agent calls.
+- `OPENAI_API_KEY` and `GATEWAY_SECRET` are intentionally absent from the
+  compose file. The fake payment adapter is used when `GATEWAY_SECRET` is not
+  set. No secret value is embedded in any tracked file.
+
+The operator desk is at `http://localhost:8000` once the stack is up.
+
+> **This is operator-hosted.** Azimi Innovation Lab does not operate or monitor
+> this stack. The operator controls the host, the database, and all credentials.
+
+---
+
 ## Quick start
 
 ```bash

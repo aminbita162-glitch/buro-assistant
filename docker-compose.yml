@@ -1,0 +1,42 @@
+# Buro Assistant — Air-gap package
+# Operator-hosted. No cloud model client is called. No gateway secret is required.
+# Run:  docker compose up
+# The app uses FakeModel for agent calls (LOCAL_MODEL=1) and the fake payment
+# adapter (GATEWAY_SECRET is absent).  Set your own DATABASE_URL if you bring
+# an external PostgreSQL instance; the default uses the bundled db service.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: buro
+      POSTGRES_USER: buro
+      POSTGRES_PASSWORD: buro
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buro -d buro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://buro:buro@db:5432/buro
+      PORT: "8000"
+      # LOCAL_MODEL=1 disables the cloud model client.  FakeModel is used instead.
+      LOCAL_MODEL: "1"
+      # OPENAI_API_KEY is intentionally absent — no cloud model is called.
+      # GATEWAY_SECRET is intentionally absent — the fake payment adapter is used.
+      # IMAP credentials are intentionally absent — FakeProvider is used.
+    ports:
+      - "8000:8000"
+
+volumes:
+  db_data:
