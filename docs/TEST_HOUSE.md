@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Phase 3 (local model route)
+**Last updated:** Phase 4 (OAuth mailbox boundary)
 
 ---
 
@@ -45,6 +45,7 @@ run.
 | 17 | 2026-10-17 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 1 — sender auth) | 725 passed, 0 failed | Sender authentication — 34 new tests |
 | 18 | 2026-10-18 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 2 — bounded thread context) | 747 passed, 0 failed | Bounded thread context — 22 new tests |
 | 19 | 2026-10-19 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 3 — local model route) | 762 passed, 0 failed | Local model route — 15 new tests |
+| 20 | 2026-10-20 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 4 — OAuth mailbox boundary) | 779 passed, 0 failed | OAuth mailbox boundary — 17 new tests |
 
 ---
 
@@ -95,6 +96,7 @@ recorded here.
 | `tests/test_sender_auth.py` | Sender auth: SenderAuthResult, check_sender_auth (pass/fail/not_run), ingest storage, pipeline send-block | Phase 1 |
 | `tests/test_thread_context.py` | Thread context: fetch, 200-char cap, PII redaction, tenant isolation, rule-hit zero tokens, prompt version | Phase 2 |
 | `tests/test_local_model.py` | Local model flag: is_local_model_enabled, FakeLocalModel client, pipeline routing for both flag states, rule-hit zero-model path | Phase 3 |
+| `tests/test_oauth_mailbox.py` | OAuth mailbox port: OAuthMailboxPort interface, FakeOAuthProvider, factory selection (tokens absent → fake, partial env → fake, app still runs) | Phase 4 |
 
 ---
 
