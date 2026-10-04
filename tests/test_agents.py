@@ -286,7 +286,7 @@ class TestAmin:
         msg = _msg(subject="invoice", sender="u@other.com")
         decision = triage(msg, rule_pack=_SIMPLE_RULE_PACK, model=model)
         assert decision["schema_version"] == "1"
-        assert decision["prompt_version"] == "amin-v2"
+        assert decision["prompt_version"] == "amin-v3"
 
     def test_deterministic_hash_without_model(self):
         """Same inputs → same hash even when model is disabled."""

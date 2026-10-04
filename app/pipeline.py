@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.amin import triage, TriageError
 from app.agents.amilos import draft_reply, ReplyError
+from app.agents.thread_context import fetch_thread_context
 from app.ingest.ingest import ingest_message, RESULT_NEW, RESULT_DUPLICATE, RESULT_QUARANTINE
 from app.ingest.models import Message
 from app.ingest.normalize import NormalizedMessage
@@ -199,10 +200,23 @@ def run_pipeline(
                 )
 
     # ---- 2. Triage (Amin) ----
+    # Phase 2: fetch a redacted, capped clip of the last three messages in
+    # the same thread.  Attachment bytes are never included.  The clip is
+    # empty when there are no prior messages.  A rule hit costs zero tokens
+    # regardless of whether thread context is present.
+    thread_ctx = fetch_thread_context(
+        db,
+        tenant_id=msg.tenant_id,
+        subject_normalized=msg.subject_normalized,
+        exclude_provider_message_id=msg.provider_message_id,
+    )
+
     tracked_triage = _TrackingModel(triage_model, triage_model_name) if triage_model else None
 
     try:
-        triage_decision = triage(msg, rule_pack=rule_pack, model=tracked_triage)
+        triage_decision = triage(
+            msg, rule_pack=rule_pack, model=tracked_triage, thread_context=thread_ctx,
+        )
     except TriageError as exc:
         return PipelineResult(
             outcome="error",

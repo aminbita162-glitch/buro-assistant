@@ -16,6 +16,10 @@ Pipeline
 8. Attach schema_version, prompt_version, decision_hash (row 14).
 
 The same inputs with the model disabled always produce the same decision hash.
+
+Phase 2: a bounded, redacted clip of the last three messages in the same
+thread is added to the model prompt.  The clip is capped at 200 characters.
+Attachment bytes are never included.  A rule hit still costs zero tokens.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ from app.agents.urgency import classify_urgency
 from app.ingest.normalize import NormalizedMessage
 
 SCHEMA_VERSION = "1"
-PROMPT_VERSION = "amin-v2"   # incremented: prompt structure changed in Phase 5
+PROMPT_VERSION = "amin-v3"   # incremented: thread context added in Phase 2
 CONFIDENCE_FLOOR = 0.0   # accept any model result ≥ 0
 
 # ---------------------------------------------------------------------------
@@ -105,6 +109,7 @@ def triage(
     msg: NormalizedMessage,
     rule_pack: Optional[Dict[str, Any]] = None,
     model: Optional[Any] = None,
+    thread_context: str = "",
 ) -> Dict[str, Any]:
     """
     Run Amin's triage pipeline and return a triage-decision dict.
@@ -118,6 +123,10 @@ def triage(
     model:
         An object with a ``.call(prompt: str) -> dict`` method.
         If ``None`` and no rule fires, raises :class:`TriageError`.
+    thread_context:
+        Redacted clip of the last three messages in the same thread,
+        capped at 200 characters.  Empty string when no prior messages exist.
+        Attachment bytes are never included.  Provided by the pipeline layer.
     """
     # 1. Redact PII before any model call (row 13).
     #    Attachment content is never passed here — only subject and body_text.
@@ -171,7 +180,10 @@ def triage(
             raise TriageError(
                 "No rule fired and no model provided — cannot produce a decision."
             )
-        prompt = _build_prompt(redacted_subject, body_clip, language, urgency, pack_hash)
+        prompt = _build_prompt(
+            redacted_subject, body_clip, language, urgency, pack_hash,
+            thread_context=thread_context,
+        )
         model_output = model.call(prompt)
 
         department = model_output.get("department", "general")
@@ -231,19 +243,32 @@ def triage(
 
 
 def _build_prompt(
-    subject: str, body_clip: str, language: str, urgency: str, pack_hash: str
+    subject: str,
+    body_clip: str,
+    language: str,
+    urgency: str,
+    pack_hash: str,
+    thread_context: str = "",
 ) -> str:
     """
     Build the model prompt.
 
     Only the redacted subject, a short body clip (≤ BODY_CLIP_CHARS chars),
     and the rule pack hash are sent.  Attachment bytes are never included.
+
+    Phase 2: when thread_context is non-empty, a ``thread:`` line carrying the
+    redacted, capped prior-message clip is appended before the return directive.
     """
-    return (
-        f"rules_hash: {pack_hash}\n"
-        f"language: {language}\n"
-        f"urgency: {urgency}\n"
-        f"subject: {subject}\n"
-        f"body: {body_clip}\n"
-        "Return JSON: {\"department\": \"...\", \"action\": \"draft_reply|hold|forward|reject|escalate\", \"confidence\": 0.0-1.0}"
+    lines = [
+        f"rules_hash: {pack_hash}",
+        f"language: {language}",
+        f"urgency: {urgency}",
+        f"subject: {subject}",
+        f"body: {body_clip}",
+    ]
+    if thread_context:
+        lines.append(f"thread: {thread_context}")
+    lines.append(
+        'Return JSON: {"department": "...", "action": "draft_reply|hold|forward|reject|escalate", "confidence": 0.0-1.0}'
     )
+    return "\n".join(lines)

@@ -234,7 +234,7 @@ class TestPromptStructure:
 
     def test_prompt_version_is_amin_v2(self):
         """Prompt version must be updated to reflect Phase 5 format change."""
-        assert PROMPT_VERSION == "amin-v2"
+        assert PROMPT_VERSION == "amin-v3"
 
     def test_prompt_contains_redacted_subject_not_raw_pii(self):
         prompts = []
