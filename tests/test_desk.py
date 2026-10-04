@@ -139,11 +139,18 @@ class TestDeskAuthRequired:
         "/desk/approval",
         "/desk/audit",
         "/desk/tasks",
+        "/desk/quota",
+        "/desk/cost",
     ]
 
     def test_all_endpoints_require_auth(self, client):
         for path in self.ENDPOINTS:
             r = client.get(path)
+            assert r.status_code == 401, f"{path} returned {r.status_code}, expected 401"
+
+    def test_approve_reject_require_auth(self, client):
+        for path in ("/desk/approval/1/approve", "/desk/approval/1/reject"):
+            r = client.post(path)
             assert r.status_code == 401, f"{path} returned {r.status_code}, expected 401"
 
 
@@ -496,3 +503,249 @@ class TestDeskTasks:
             db.close()
         r = client.get("/desk/tasks", headers={"Authorization": f"Bearer {token}"})
         assert r.json()["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 – Approve / reject
+# ---------------------------------------------------------------------------
+
+class TestApproveReject:
+    def test_approve_returns_200(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        db = SessionLocal()
+        try:
+            entry = enqueue(db, tenant.id, "Re: invoice", "Please approve.")
+        finally:
+            db.close()
+        r = client.post(
+            f"/desk/approval/{entry.id}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "approved"
+
+    def test_reject_returns_200(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        db = SessionLocal()
+        try:
+            entry = enqueue(db, tenant.id, "Re: invoice", "Please reject.")
+        finally:
+            db.close()
+        r = client.post(
+            f"/desk/approval/{entry.id}/reject",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "rejected"
+
+    def test_approve_missing_entry_returns_404(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        r = client.post(
+            "/desk/approval/9999/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 404
+
+    def test_reject_missing_entry_returns_404(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        r = client.post(
+            "/desk/approval/9999/reject",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 404
+
+    def test_approve_cross_tenant_returns_404(self, client):
+        """Operator from tenant 1 cannot approve tenant 2's entry."""
+        t1 = _make_tenant("t1-apr")
+        t2 = _make_tenant("t2-apr")
+        _make_user(t1, "apr1@example.com")
+        _make_user(t2, "apr2@example.com")
+        db = SessionLocal()
+        try:
+            entry = enqueue(db, t2.id, "Re: invoice", "Tenant 2 approval.")
+        finally:
+            db.close()
+        token1 = _login(client, "apr1@example.com")
+        r = client.post(
+            f"/desk/approval/{entry.id}/approve",
+            headers={"Authorization": f"Bearer {token1}"},
+        )
+        assert r.status_code == 404
+
+    def test_approve_twice_returns_404(self, client):
+        """Approving an already-resolved entry returns 404."""
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        hdr = {"Authorization": f"Bearer {token}"}
+        db = SessionLocal()
+        try:
+            entry = enqueue(db, tenant.id, "Re: double", "Body.")
+        finally:
+            db.close()
+        r1 = client.post(f"/desk/approval/{entry.id}/approve", headers=hdr)
+        assert r1.status_code == 200
+        r2 = client.post(f"/desk/approval/{entry.id}/approve", headers=hdr)
+        assert r2.status_code == 404
+
+    def test_entry_not_in_approval_list_after_resolve(self, client):
+        """After resolving, entry no longer appears in pending list."""
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        hdr = {"Authorization": f"Bearer {token}"}
+        db = SessionLocal()
+        try:
+            entry = enqueue(db, tenant.id, "Re: remove", "Body.")
+        finally:
+            db.close()
+        client.post(f"/desk/approval/{entry.id}/approve", headers=hdr)
+        r = client.get("/desk/approval", headers=hdr)
+        ids = [e["id"] for e in r.json()["entries"]]
+        assert entry.id not in ids
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 – Quota
+# ---------------------------------------------------------------------------
+
+class TestDeskQuota:
+    def test_quota_returns_200(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        r = client.get("/desk/quota", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+
+    def test_quota_has_required_keys(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        data = client.get(
+            "/desk/quota", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+        for key in ("quota_date", "daily_token_quota", "tokens_used",
+                    "tokens_remaining", "cost_usd_used"):
+            assert key in data, f"missing key: {key}"
+
+    def test_quota_is_tenant_scoped(self, client):
+        t1 = _make_tenant("t1-quota")
+        t2 = _make_tenant("t2-quota")
+        _make_user(t1, "q1@example.com")
+        _make_user(t2, "q2@example.com")
+        token1 = _login(client, "q1@example.com")
+        data = client.get(
+            "/desk/quota", headers={"Authorization": f"Bearer {token1}"}
+        ).json()
+        assert data["tenant_id"] == t1.id
+
+    def test_quota_tokens_remaining_not_negative(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        data = client.get(
+            "/desk/quota", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+        assert data["tokens_remaining"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 – Cost
+# ---------------------------------------------------------------------------
+
+class TestDeskCost:
+    def test_cost_returns_200(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        r = client.get("/desk/cost", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+
+    def test_cost_has_required_keys(self, client):
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        data = client.get(
+            "/desk/cost", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+        for key in ("total_tokens", "total_cost_usd", "event_count", "events"):
+            assert key in data, f"missing key: {key}"
+
+    def test_cost_is_tenant_scoped(self, client):
+        t1 = _make_tenant("t1-cost")
+        t2 = _make_tenant("t2-cost")
+        _make_user(t1, "c1@example.com")
+        _make_user(t2, "c2@example.com")
+        token1 = _login(client, "c1@example.com")
+        data = client.get(
+            "/desk/cost", headers={"Authorization": f"Bearer {token1}"}
+        ).json()
+        assert data["tenant_id"] == t1.id
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 – Department as stored field
+# ---------------------------------------------------------------------------
+
+class TestDepartmentStoredField:
+    def test_message_serialiser_includes_department(self, client):
+        """Queue response includes 'department' in each message dict."""
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        _ingest(tenant.id, "dept-1", "Billing request")
+        r = client.get("/desk/queue", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        messages = r.json()["messages"]
+        assert len(messages) >= 1
+        assert "department" in messages[0]
+
+    def test_department_queue_matches_stored_field(self, client):
+        """
+        When a message has department='support' stored, it is returned by
+        /desk/queue/support even if the subject does not contain 'support'.
+        """
+        tenant = _make_tenant("default")
+        _make_user(tenant)
+        token = _login(client, "op@example.com")
+        hdr = {"Authorization": f"Bearer {token}"}
+
+        # Insert message with explicit department column.
+        db = SessionLocal()
+        try:
+            from app.ingest.normalize import NormalizedMessage
+            from app.ingest.ingest import ingest_message
+            msg = NormalizedMessage(
+                provider="fake",
+                provider_message_id="dept-stored-1",
+                tenant_id=tenant.id,
+                message_id_header=None,
+                subject="Completely unrelated title",
+                subject_normalized="completely unrelated title",
+                sender="s@example.com",
+                recipients=[],
+                body_text="body",
+                attachments=[],
+                raw={},
+            )
+            record, _ = ingest_message(db, msg)
+            record.department = "support"
+            db.commit()
+        finally:
+            db.close()
+
+        r = client.get("/desk/queue/support", headers=hdr)
+        assert r.status_code == 200
+        data = r.json()
+        subjects = [m["subject_normalized"] for m in data["messages"]]
+        assert any("unrelated" in s for s in subjects), (
+            "Message with stored department='support' not found in /desk/queue/support"
+        )

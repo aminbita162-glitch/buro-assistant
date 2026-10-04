@@ -35,6 +35,10 @@ class Message(Base):
     message_id_header = Column(String, nullable=True)  # RFC 5322 Message-Id
     subject_normalized = Column(String, nullable=True)
 
+    # Stored department (Phase 3 – row 24 upgrade).
+    # Previously inferred from subject keyword; now a first-class stored field.
+    department = Column(String, nullable=True, index=True)
+
     # Ingest metadata.
     ingest_time = Column(DateTime(timezone=True), nullable=False)
     state = Column(String, nullable=False, default="new")
