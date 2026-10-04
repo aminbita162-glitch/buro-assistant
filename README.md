@@ -287,8 +287,8 @@ Phases 1–5 of the follow-up contract are closed. Remaining phases:
 
 | Phase | Title | Status |
 |---|---|---|
-| Follow-up 6 | Cinematic README and release surface | in progress |
-| Follow-up 7 | Company capabilities (15 buyer options) | planned |
+| Follow-up 6 | Cinematic README and release surface | closed |
+| Follow-up 7 | Company capabilities (15 buyer options) | closed |
 | Follow-up 8 | Differentiation pack (15 finish items) | planned |
 | Follow-up 9 | Test house and release 1.1.0 | planned |
 | Follow-up 10 | External proof and freeze | planned |

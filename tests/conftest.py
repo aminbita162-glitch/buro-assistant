@@ -80,6 +80,12 @@ try:
 except Exception:
     pass
 
+# Register Phase 7 ORM models (buyer features).
+try:
+    import app.domain.buyer_features  # noqa: F401
+except Exception:
+    pass
+
 
 
 # ---------------------------------------------------------------------------
