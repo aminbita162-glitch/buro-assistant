@@ -1,82 +1,120 @@
-# Phase 1 Release Notes
+# Phase 1 — Sender Authentication
 
-**Product:** Buro Assistant
-**Phase:** 1 – Governance and layout
-**Date:** 2026-10-03
-**Branch:** phase-1
-**Development restart:** 2026-10-03
+**Date:** 2026-10-17
+**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
+**Branch:** main
 
 ---
 
-## Test command
+## Summary
 
-```bash
-pytest tests/
+Phase 1 adds SPF, DKIM, and DMARC result storage to every inbound message.
+Amin can read the results. A fail does not auto-send and does not delete.
+If live DNS is not configured, the check is recorded as `not_run`.
+
+---
+
+## What was built
+
+### New module — `app/ingest/sender_auth.py`
+
+A self-contained sender-authentication module that:
+
+- Defines `SenderAuthResult` with three fields: `spf`, `dkim`, `dmarc`.
+- Each field holds exactly one of `"pass"`, `"fail"`, or `"not_run"`.
+- `SenderAuthResult.any_fail` returns `True` when at least one field is `"fail"`.
+- The public function `check_sender_auth(sender, raw_headers)` runs DNS lookups
+  via `dnspython` when `SENDER_AUTH_ENABLED=1` is set in the environment.
+- When `SENDER_AUTH_ENABLED` is absent or `"0"`, all three checks return `"not_run"`.
+- When `dnspython` is not installed, all three checks return `"not_run"`.
+- SPF: checks the `v=spf1` TXT record; `-all` (hard fail) → `"fail"`.
+- DKIM: checks for a `DKIM-Signature` header and resolves the selector key.
+- DMARC: checks for a `v=DMARC1` TXT record at `_dmarc.<domain>`.
+
+### Schema changes — `app/ingest/models.py`
+
+Three new `String` columns added to the `messages` table:
+
+| Column | Values | Default |
+|---|---|---|
+| `auth_spf` | `pass` / `fail` / `not_run` | `not_run` |
+| `auth_dkim` | `pass` / `fail` / `not_run` | `not_run` |
+| `auth_dmarc` | `pass` / `fail` / `not_run` | `not_run` |
+
+### NormalizedMessage — `app/ingest/normalize.py`
+
+Three new fields `auth_spf`, `auth_dkim`, `auth_dmarc` added to
+`NormalizedMessage` (default `"not_run"`). Provider adapters or callers may
+pre-populate these; the ingest layer uses pre-populated values when present
+and only runs the DNS check when all three are `"not_run"`.
+
+### Ingest layer — `app/ingest/ingest.py`
+
+`ingest_message` now runs `check_sender_auth` (or uses pre-populated values)
+and stores all three results on the `Message` row. A `"fail"` result does
+**not** change the message state; the message is always stored.
+
+### Triage agent — `app/agents/amin.py`
+
+The triage decision dict returned by `triage()` now includes:
+
+```json
+{
+  "auth_spf": "pass | fail | not_run",
+  "auth_dkim": "pass | fail | not_run",
+  "auth_dmarc": "pass | fail | not_run"
+}
 ```
 
-**Result:** No tests exist yet. The test harness is in place (`tests/` package created). Tests are added from Phase 2 onwards.
+The in-process triage cache key was extended to include auth fields so that
+two messages with the same subject but different auth results are never confused.
 
-The application starts and serves all existing routes:
+### Pipeline — `app/pipeline.py`
 
-```bash
-./run.sh
-# GET  /         → operator UI (index.html)
-# GET  /health   → {"status": "ok"}
-# POST /auth/signup
-# POST /auth/login
-# POST /auth/logout
-# GET  /auth/me
-# GET  /stats
-# GET  /tasks
-# GET  /tasks/search
-# GET  /tasks/{id}
-# DELETE /tasks/{id}
-# PUT  /tasks/{id}
-# POST /tasks/{id}/ai-update
-# POST /tasks/ai-delete
-# POST /assistant
-# POST /analyze
-```
+Before issuing the `send` outcome, the pipeline checks `triage_decision` for
+any `"fail"` auth result. If any check is `"fail"`, auto-send is blocked
+regardless of the tenant `auto_reply_enabled` policy. The message is preserved
+in the database; it is **not** deleted.
+
+### Migration — `migrations/versions/0012_sender_auth.py`
+
+Revision `0012` (revises `0011`) adds `auth_spf`, `auth_dkim`, `auth_dmarc`
+to the `messages` table with `server_default="not_run"`. Existing rows receive
+`"not_run"` on upgrade.
 
 ---
 
-## Checklist rows closed
+## Behaviour contract
 
-| Row | Capability |
-|-----|-----------|
-| 39 | Capability matrix added (`docs/CAPABILITY_MATRIX.md`) with Designed for and Verified columns |
-
----
-
-## Changes in this phase
-
-| File | Change |
-|------|--------|
-| `LICENSE` | Added; text from DIRECTIVE.txt section 7 |
-| `README.md` | Replaced; shape from DIRECTIVE.txt section 8 |
-| `docs/CAPABILITY_MATRIX.md` | Added; all 50 checklist rows with Designed for and Verified columns |
-| `docs/releases/phase-1.md` | This file |
-| `.env.example` | Added; documents all environment variables |
-| `requirements.txt` | Dependencies pinned to exact latest versions |
-| `run.sh` | Added shebang, `set -e`, and `PORT` default |
-| `app/__init__.py` | Added; marks `app` as a Python package |
-| `app/api/__init__.py` | Stub; implementation in Phase 2+ |
-| `app/domain/__init__.py` | Stub; implementation in Phase 3+ |
-| `app/ingest/__init__.py` | Stub; implementation in Phase 4+ |
-| `app/agents/__init__.py` | Stub; implementation in Phase 5+ |
-| `app/policy/__init__.py` | Stub; implementation in Phase 6+ |
-| `app/workers/__init__.py` | Stub; implementation in Phase 8+ |
-| `app/web/__init__.py` | Stub; implementation in Phase 7+ |
-| `migrations/` | Directory created; Alembic baseline in Phase 3 |
-| `schemas/` | Directory created; agent schemas in Phase 5 |
-| `tests/__init__.py` | Test package created; tests added from Phase 2 |
-
-All existing routes remain operational. `app/main.py` is unchanged.
+| Condition | SPF/DKIM/DMARC stored | Auto-send | Message deleted |
+|---|---|---|---|
+| DNS check passes | `"pass"` | allowed if policy permits | no |
+| DNS check fails | `"fail"` | **blocked** | no |
+| DNS not configured (`SENDER_AUTH_ENABLED` absent) | `"not_run"` | allowed if policy permits | no |
+| `dnspython` not installed | `"not_run"` | allowed if policy permits | no |
 
 ---
 
-## Notes
+## Tests added — `tests/test_sender_auth.py`
 
-- No business logic was moved or removed. The single-file `app/main.py` remains the entry point and all routes it provides continue to work.
-- The sub-package stubs (`app/api/`, `app/domain/`, etc.) are empty. Code will be moved into them phase by phase once tested replacements exist.
-- Phase 2 begins only on a new operator instruction.
+34 new tests across six classes:
+
+| Class | Tests | Covers |
+|---|---|---|
+| `TestSenderAuthResult` | 8 | Value validation, `any_fail`, sentinel constant |
+| `TestCheckSenderAuthDisabled` | 4 | Not-run when env unset, bad sender, dnspython absent |
+| `TestCheckSenderAuthPass` | 4 | SPF pass, DMARC pass, DKIM pass, all pass |
+| `TestCheckSenderAuthFail` | 4 | SPF fail, DKIM fail, DMARC not-run on error, `any_fail` |
+| `TestIngestStoresAuthColumns` | 5 | DB columns present, pass/fail/not_run stored, fail preserves message |
+| `TestPipelineAuthSendBlock` | 6 | SPF/DKIM/DMARC fail blocks send, pass and not_run allow send, message preserved |
+| `TestTriageDecisionIncludesAuth` | 3 | Auth fields in triage decision for pass, fail, not_run |
+
+---
+
+## Test result
+
+`python3 -m pytest tests/ -q` → **725 passed, 0 failed**
+
+---
+
+*For questions contact: Amin Azizi, AI Architect, Azimi Innovation Lab.*

@@ -1,39 +1,42 @@
-Buro Assistant — Commercial contract
+Buro Assistant — Final build contract
 Development restart of this contract: 2026-10-04
 Owner: Amin Azimi, AI Architect, Azimi Innovation Lab
 Repository: aminbita162-glitch/buro-assistant, branch main only
 License already in the repo stays. Do not add secrets, keys, card numbers, or private links.
 
-This file replaces the follow-up contract. Phases 1-10 of that contract are closed on main. Do not redo them. Do not create a branch.
+This file replaces the commercial contract. Follow-up phases 1-10 and commercial phases 1-5 are closed on main. Do not redo them. Do not create a branch.
 
-Product names stay: Amin splits and controls, Amilos drafts from an approved template, Leila supervises exceptions. Rules before model. Send stays off unless the tenant policy allows it.
+After this contract, only commercialization remains: a real payment vendor and a market launch. Do not build either here. The external script docs/EXTERNAL_TEST.sh stays not run. Do not mark it run.
 
-Stop rule: each phase ends when its report is written and tests pass. Then stop. Do not start the next phase.
+Product names stay: Amin splits and controls, Amilos drafts from an approved template, Leila supervises exceptions. Rules before model. Send stays off unless the tenant policy allows it. Trial still cannot send.
 
-Honesty rule: designed-for is not verified. The external script docs/EXTERNAL_TEST.sh has not been run by a second account. Do not mark it run. A failed test is written as failed in docs/TEST_HOUSE.md.
+Stop rule: at the end of each phase, commit on main with a one-line message, write the phase report, then stop. Do not start the next phase. Do not push. The operator pushes.
 
-Commercial decision locked for this contract:
-- No permanent free plan.
-- Every new tenant gets a 10-day trial, then must choose a paid plan.
-- Trial has a token cap and cannot send mail.
-- Plan 1, Desk: 65 EUR per month, band 50-80. Shared desk, no model, no three agents.
-- Plan 2, Mail: 149 EUR per month, band 80-200. Desk plus mailbox intake. Model stays off.
-- Plan 3, Agents: 270 EUR per month, band 200-320. Amin, Amilos, and Leila, with a monthly token cap.
-- Prices are list prices inside the locked bands. They are not a measured market study.
-- Apple Developer membership is not a payment rail for this product. Do not mention it in product files.
-- No card data is stored. A gateway secret is read from the environment only. If the secret is absent, the fake gateway is used and the app still runs.
+Honesty rule: designed-for is not verified. A failed test is written as failed in docs/TEST_HOUSE.md.
 
-Phase 1 — Plan and trial state
-Add a tenant subscription record: plan code, status, trial end, token cap, token used. New tenant starts on trial. After 10 days, status becomes expired and agent routes refuse work. Tests for the four states. App stays runnable.
+Phase 1 — Sender authentication
+Store SPF, DKIM, and DMARC results on the inbound message. Amin may read them. A fail does not auto-send and does not delete. If live DNS is not configured, record the check as not run. Tests for pass, fail, and not run.
 
-Phase 2 — Gateway boundary
-Add a payment port with two adapters: fake when no gateway secret is set, live only when the secret is in the environment. The live adapter must not log the secret. No Stripe key, no card number, and no private URL in the repo. Tests use the fake adapter only.
+Phase 2 — Bounded thread context
+Add a redacted clip of the last three messages in the same thread to Amin's prompt. Cap the clip at 200 characters total. Attachment bytes stay out. A rule hit still costs zero tokens. Tests for the cap.
 
-Phase 3 — Enforce the three plans
-Desk plan cannot call Amin, Amilos, or Leila. Mail plan cannot call a model. Agents plan can call them only under the token cap. A rule hit still costs zero tokens. Send stays off on trial. Tests for each refusal.
+Phase 3 — Local model route
+Add a tenant flag for local model. When set, the cloud model client is not called. The fake local client is used in tests. No new vendor key in the repo. Tests for both flags.
 
-Phase 4 — Operator surface
-The desk shows plan, trial days left, and token cap. It has no card field. Expired trial shows a choose-plan state and does not lock the whole app. README states sale wiring is in progress and hosting is not offered.
+Phase 4 — Mailbox OAuth boundary
+Add an OAuth mailbox port beside the IMAP adapter. Tokens are read from the environment only. If absent, the existing fake provider is used and the app still runs. No token value in the repo. Tests use the fake port only.
 
-Phase 5 — Record and freeze
-Write docs/releases/commercial-phase-5.md. Record the run in docs/TEST_HOUSE.md. State that the second-account script is still not run. Stop. Do not start a phase 6.
+Phase 5 — Audit hash chain
+Extend the append-only audit log with the hash of the previous row. Do not rewrite old rows. Tests prove a changed row breaks the chain.
+
+Phase 6 — Desk signals
+Complete the daily digest as shadow only. Add semantic duplicate as a flag, not a second message. Extract text only from an already-allowed attachment type, and never send those bytes to a model. Add a dissatisfied-tone flag that routes to Leila and does not send. Tests for each flag.
+
+Phase 7 — Air-gap package
+Add a Docker compose file that runs the app and database with no cloud model and no gateway secret. The README states this is operator-hosted. Tests or a script check that the compose file names no secret.
+
+Phase 8 — Visual README
+Replace the plain opening with a visual release surface. GitHub cannot run arbitrary page animation, so use real rendered visuals: a cover SVG, shields.io badges, a Mermaid diagram, colored callout tables, and one looping GIF stored in docs/assets. No private URL. No claim that sale or hosting is done. Author line stays Amin Azimi, Azimi Innovation Lab. External-links section stays.
+
+Phase 9 — Record and freeze
+Write docs/releases/final-phase-9.md. Record the run in docs/TEST_HOUSE.md. State that commercialization and the second-account run are not done. Commit and stop. Do not start a phase 10.

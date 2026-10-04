@@ -6,6 +6,7 @@ Rows closed:
   4  – immutable raw_json stored at ingest time
   9  – duplicate detection: message_id_header + subject_normalized unique per tenant
   12 – attachment_state: clean | quarantine | none
+  Phase 1 – sender authentication: spf, dkim, dmarc stored per message
 """
 from __future__ import annotations
 
@@ -51,6 +52,13 @@ class Message(Base):
     # Legal hold (Phase 4 / Section B item 12).
     # When True, retention delete and right-to-erasure skip this row.
     legal_hold = Column(Boolean, nullable=False, default=False)
+
+    # Sender authentication (Phase 1).
+    # Values: "pass" | "fail" | "not_run"
+    # "not_run" means live DNS was not configured at ingest time.
+    auth_spf = Column(String, nullable=False, default="not_run")
+    auth_dkim = Column(String, nullable=False, default="not_run")
+    auth_dmarc = Column(String, nullable=False, default="not_run")
 
     __table_args__ = (
         # Row 3 – idempotency key.

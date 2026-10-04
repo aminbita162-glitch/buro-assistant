@@ -7,6 +7,7 @@ Rows closed:
   6  – accepts NormalizedMessage; provider-neutral
   9  – duplicate detection by message_id_header + subject_normalized per tenant
   12 – attachment_state set from provider adapter classification
+  Phase 1 – sender authentication: auth_spf / auth_dkim / auth_dmarc stored
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.ingest.models import Message
 from app.ingest.normalize import NormalizedMessage
+from app.ingest.sender_auth import check_sender_auth
 
 
 # Result codes returned by ingest_message.
@@ -85,6 +87,21 @@ def ingest_message(
         duplicate = _find_content_duplicate(db, msg)
         state = RESULT_DUPLICATE if duplicate else RESULT_NEW
 
+    # ---- Sender authentication (Phase 1) ----
+    # Run the check using whatever results the message already carries
+    # (a provider may pre-populate them) or perform the DNS lookup now.
+    # Pre-populated values on msg take precedence so tests can inject results.
+    auth_spf = msg.auth_spf
+    auth_dkim = msg.auth_dkim
+    auth_dmarc = msg.auth_dmarc
+    if auth_spf == "not_run" and auth_dkim == "not_run" and auth_dmarc == "not_run":
+        # No pre-populated result — run the DNS check.
+        raw_headers = msg.raw.get("headers", {}) if isinstance(msg.raw, dict) else {}
+        auth_result = check_sender_auth(msg.sender, raw_headers)
+        auth_spf = auth_result.spf
+        auth_dkim = auth_result.dkim
+        auth_dmarc = auth_result.dmarc
+
     # ---- Store (row 4 – raw_json written once) ----
     record = Message(
         tenant_id=msg.tenant_id,
@@ -96,6 +113,9 @@ def ingest_message(
         ingest_time=datetime.now(timezone.utc),
         state=state,
         attachment_state=att_state,
+        auth_spf=auth_spf,
+        auth_dkim=auth_dkim,
+        auth_dmarc=auth_dmarc,
     )
     try:
         db.add(record)

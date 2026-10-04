@@ -29,6 +29,7 @@ from app.agents.amilos import draft_reply, ReplyError
 from app.ingest.ingest import ingest_message, RESULT_NEW, RESULT_DUPLICATE, RESULT_QUARANTINE
 from app.ingest.models import Message
 from app.ingest.normalize import NormalizedMessage
+from app.ingest.sender_auth import AUTH_FAIL
 from app.policy.approval import enqueue as enqueue_approval
 from app.policy.send_decision import should_send, SEND_DECISION_ALLOW
 from app.policy.shadow import store_draft
@@ -278,8 +279,15 @@ def run_pipeline(
         _emit_cost_event(db, msg.tenant_id, total_cost, reference_id=message.id)
 
         # ---- 5. Send decision ----
+        # Phase 1: block auto-send when any auth check is "fail".
+        # A fail does not delete the message; it only prevents sending.
+        auth_blocked = (
+            triage_decision.get("auth_spf") == AUTH_FAIL
+            or triage_decision.get("auth_dkim") == AUTH_FAIL
+            or triage_decision.get("auth_dmarc") == AUTH_FAIL
+        )
         send_dec = should_send(policy_config)
-        if send_dec == SEND_DECISION_ALLOW:
+        if send_dec == SEND_DECISION_ALLOW and not auth_blocked:
             # Caller handles actual delivery; we record state as "send".
             return PipelineResult(
                 outcome="send",

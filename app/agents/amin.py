@@ -153,7 +153,11 @@ def triage(
     if rule_hit:
         # Rule fires → no model call; deterministic result.
         # Check cache first to avoid redundant work on identical inputs.
-        cache_key = (redacted_subject, body_clip, pack_hash, rule_hit.rule_name)
+        # Phase 1: auth fields are part of the cache key (they vary per message).
+        cache_key = (
+            redacted_subject, body_clip, pack_hash, rule_hit.rule_name,
+            msg.auth_spf, msg.auth_dkim, msg.auth_dmarc,
+        )
         if cache_key in _TRIAGE_CACHE:
             return _TRIAGE_CACHE[cache_key]
 
@@ -204,15 +208,23 @@ def triage(
         "action": action,
         "reason": f"rule:{rule_hit_name}" if rule_hit_name else "model",
         "decision_hash": decision_hash,
+        # Phase 1: sender authentication results — readable by Amin.
+        "auth_spf": msg.auth_spf,
+        "auth_dkim": msg.auth_dkim,
+        "auth_dmarc": msg.auth_dmarc,
     }
     _validate(decision)
 
     # Store rule-hit results in the cache.
+    # Phase 1: auth fields vary per message; include them in the cache key.
     if rule_hit_name is not None:
         if len(_TRIAGE_CACHE) >= _CACHE_MAX:
             # Evict the oldest entry (insertion-ordered dict, Python 3.7+).
             _TRIAGE_CACHE.pop(next(iter(_TRIAGE_CACHE)))
-        cache_key = (redacted_subject, body_clip, pack_hash, rule_hit_name)
+        cache_key = (
+            redacted_subject, body_clip, pack_hash, rule_hit_name,
+            msg.auth_spf, msg.auth_dkim, msg.auth_dmarc,
+        )
         _TRIAGE_CACHE[cache_key] = decision
 
     return decision
