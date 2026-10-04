@@ -1,12 +1,31 @@
+<p align="center">
+  <img src="docs/assets/cover.svg" alt="Buro Assistant cover" width="780"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-3b82f6?style=flat-square" alt="version"/>
+  <img src="https://img.shields.io/badge/phase-8%20closed-22c55e?style=flat-square" alt="phase 8 closed"/>
+  <img src="https://img.shields.io/badge/tests-504%20passing-22c55e?style=flat-square" alt="tests"/>
+  <img src="https://img.shields.io/badge/self--hosted-operator--controlled-7c5cd8?style=flat-square" alt="self-hosted"/>
+  <img src="https://img.shields.io/badge/send-off%20by%20default-f59e0b?style=flat-square" alt="send off by default"/>
+  <img src="https://img.shields.io/badge/license-see%20LICENSE-57606a?style=flat-square" alt="license"/>
+</p>
+
+<p align="center">
+  <img src="docs/assets/buro-loop.gif" alt="Buro live indicator" width="60"/>
+</p>
+
 # Buro Assistant
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Current version:** 1.0.0 (follow-up Phase 8 closed)
+**Current version:** 1.0.0 (Phase 8 closed)
 **License:** see `LICENSE`
 
 ---
 
 ## At a glance
+
+> Self-hosted · Multi-tenant · Rules before model · Append-only audit
 
 Buro Assistant is a self-hosted, multi-tenant office mail desk.
 It polls a mailbox, classifies each message with rules before any model call,
@@ -15,13 +34,15 @@ operator queue. The operator approves, rejects, or lets the system send.
 Everything is tenant-scoped. Nothing is invented — no prices, no dates, no
 facts beyond what the template allows.
 
-**Five things a buyer checks first:**
+### Five things a buyer checks first
 
-1. **Rule before model** — a rule match produces zero model tokens.
-2. **Redaction before model** — PII fields are stripped before the prompt is built.
-3. **Shadow mode** — drafts are stored and not sent unless the operator enables auto-reply.
-4. **Append-only audit log** — every decision is recorded and cannot be overwritten.
-5. **Self-hosted** — the database region is operator-controlled. There is no hosted service.
+| # | Property | Detail |
+|---|---|---|
+| 1 | **Rule before model** | A rule match produces zero model tokens |
+| 2 | **Redaction before model** | PII fields are stripped before the prompt is built |
+| 3 | **Shadow mode** | Drafts are stored and not sent unless the operator enables auto-reply |
+| 4 | **Append-only audit log** | Every decision is recorded and cannot be overwritten |
+| 5 | **Self-hosted** | The database region is operator-controlled; there is no hosted service |
 
 ---
 
@@ -58,58 +79,42 @@ Redaction runs before every model call. Shadow mode stores a draft and does not 
 
 ## Architecture diagram
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  External mail server (operator-hosted)                         │
-│  IMAP / SMTP                                                    │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  app/ingest/                                                    │
-│  IMAPProvider  or  FakeProvider (no mailbox env set)            │
-│  → normalize → idempotency check → raw store                   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  app/agents/                                                    │
-│  Amin (triage)                                                  │
-│    rule engine → rule hit? ──yes──→ decision (no model call)   │
-│                         │                                       │
-│                         no                                      │
-│                         ▼                                       │
-│    redact → language detect → urgency → model call             │
-│    schema validate → decision hash                             │
-│                         │                                       │
-│    confidence < threshold ──→ Leila (supervisor)               │
-│                         │                                       │
-│    confidence ≥ threshold ──→ Amilos (reply)                   │
-│    template registry → forbidden-phrase check → draft          │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  app/policy/                                                    │
-│  tenant send policy                                             │
-│    shadow mode ──→ draft stored, not sent                      │
-│    approval required ──→ human approval queue                  │
-│    auto-reply on ──→ outbound delivery + signed webhook        │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  app/workers/                                                   │
-│  priority-lane queue  •  quota  •  backpressure                │
-│  dead-letter replay   •  traces  •  cost events                │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  app/web/  (operator desk at /desk/*)                           │
-│  dashboard  •  inbound  •  decisions  •  drafts                │
-│  approval   •  audit    •  quota/cost •  privacy               │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    MAIL["📬 External mail server\n(operator-hosted IMAP/SMTP)"]
+    INGEST["app/ingest/\nIMAPProvider · FakeProvider\nnormalize → idempotency → raw store"]
+    AMIN["Amin — triage\nrule engine"]
+    RULE_HIT{"rule hit?"}
+    DECISION_RULE["decision\n(zero model tokens)"]
+    REDACT["redact → language → urgency\n→ model call → schema validate"]
+    CONF{"confidence\n≥ threshold?"}
+    LEILA["Leila — supervisor\nhold · request_human · reject · reroute"]
+    AMILOS["Amilos — reply\ntemplate registry → forbidden-phrase check → draft"]
+    POLICY["app/policy/\ntenant send policy"]
+    SHADOW["shadow mode\ndraft stored · not sent"]
+    APPROVAL["approval required\nhuman approval queue"]
+    AUTOREPLY["auto-reply on\noutbound delivery + signed webhook"]
+    WORKERS["app/workers/\npriority lanes · quota · backpressure\ndead-letter replay · traces · cost events"]
+    DESK["app/web/ — operator desk /desk/*\ndashboard · inbound · decisions · drafts\napproval · audit · quota/cost · privacy"]
+
+    MAIL --> INGEST
+    INGEST --> AMIN
+    AMIN --> RULE_HIT
+    RULE_HIT -- yes --> DECISION_RULE
+    RULE_HIT -- no --> REDACT
+    REDACT --> CONF
+    CONF -- no --> LEILA
+    CONF -- yes --> AMILOS
+    DECISION_RULE --> POLICY
+    AMILOS --> POLICY
+    LEILA --> POLICY
+    POLICY --> SHADOW
+    POLICY --> APPROVAL
+    POLICY --> AUTOREPLY
+    SHADOW --> WORKERS
+    APPROVAL --> WORKERS
+    AUTOREPLY --> WORKERS
+    WORKERS --> DESK
 ```
 
 Full diagram source: [`docs/diagrams/architecture.txt`](docs/diagrams/architecture.txt)
@@ -153,6 +158,38 @@ the model disabled, produce the same decision hash.
 | `schemas/` | JSON schemas for triage_decision, reply_draft, supervisor_decision |
 | `tests/` | Unit, contract, tenant isolation, golden messages, release checks |
 | `docs/` | INSTALL, RUNBOOK, BENCHMARK, CAPABILITY_MATRIX, THREAT_MODEL, PRIVACY_DATA_MAP, COMPARISON, TEST_HOUSE, INSTALL_VIDEO_SCRIPT, releases, diagrams |
+
+---
+
+## Security and privacy callouts
+
+> **Rules before model.** A rule match never calls the model client. Zero tokens, zero cost.
+
+| Guarantee | Scope | Detail |
+|---|---|---|
+| 🔒 Redaction before every model call | All tenants | PII fields stripped from the prompt before it is sent |
+| 🔒 Attachment bytes never sent to model | All tenants | Text extraction stays in-process; no bytes forwarded |
+| 🔒 Append-only audit log with hash chain | All tenants | Each row carries the SHA-256 of the previous row |
+| 🔒 Shadow mode on by default | Trial + new tenants | Drafts are stored; outbound delivery requires explicit operator action |
+| 🔒 Sender authentication recorded | All inbound | SPF · DKIM · DMARC results stored; a fail does not auto-send |
+| 🔒 Scoped API keys, stored hashed | Operator API | Keys are SHA-256 hashed at rest; the plain value is shown once |
+| 🔒 Signed outbound webhooks | Outbound events | HMAC-SHA256 signature on every webhook delivery |
+| 🔒 No secret value in tracked files | Repo | `OPENAI_API_KEY`, `GATEWAY_SECRET`, and `IMAP_PASSWORD` come from the environment only |
+
+> **Data residency.** The database region is operator-controlled. Azimi Innovation Lab does not operate a hosted service.
+
+---
+
+## Agent roles at a glance
+
+| Agent | Accepts | Returns | Cannot do |
+|---|---|---|---|
+| **Amin** (triage) | Normalized message + tenant rule pack | `triage_decision.json` | Send mail · write billing · invent facts |
+| **Amilos** (reply) | Triage decision + approved template | `reply_draft.json` | Invent prices · legal promises · dates not in template |
+| **Leila** (supervisor) | Exception from Amin | `supervisor_decision.json` | Send · delete · approve without operator |
+
+Allowed supervisor actions: `hold` · `request_human` · `reject` · `reroute`.
+Model output that fails schema validation becomes a supervisor exception and is not written as a decision.
 
 ---
 
