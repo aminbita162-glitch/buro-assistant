@@ -1,6 +1,6 @@
 Buro Assistant — Architecture Diagram
 Author: Amin Azimi, AI Architect, Azimi Innovation Lab
-Last updated: Follow-up Phase 6
+Last updated: Follow-up Phase 8
 
 =======================================================================
   EXTERNAL BOUNDARY
@@ -134,7 +134,7 @@ Last updated: Follow-up Phase 6
   DATA LAYER  (migrations/   SQLAlchemy)
 =======================================================================
 
-  Schema changes: Alembic only (versions 0001–0006)
+  Schema changes: Alembic only (versions 0001–0010)
   No CREATE TABLE or ALTER TABLE on import
 
   Key tables:

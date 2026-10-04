@@ -1,8 +1,27 @@
 # Buro Assistant
 
-**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab  
-**Current version:** 1.0.0 (follow-up Phase 5 closed)  
+**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
+**Current version:** 1.0.0 (follow-up Phase 8 closed)
 **License:** see `LICENSE`
+
+---
+
+## At a glance
+
+Buro Assistant is a self-hosted, multi-tenant office mail desk.
+It polls a mailbox, classifies each message with rules before any model call,
+drafts a short receipt from an approved template, and routes the work to an
+operator queue. The operator approves, rejects, or lets the system send.
+Everything is tenant-scoped. Nothing is invented — no prices, no dates, no
+facts beyond what the template allows.
+
+**Five things a buyer checks first:**
+
+1. **Rule before model** — a rule match produces zero model tokens.
+2. **Redaction before model** — PII fields are stripped before the prompt is built.
+3. **Shadow mode** — drafts are stored and not sent unless the operator enables auto-reply.
+4. **Append-only audit log** — every decision is recorded and cannot be overwritten.
+5. **Self-hosted** — the database region is operator-controlled. There is no hosted service.
 
 ---
 
@@ -124,16 +143,16 @@ the model disabled, produce the same decision hash.
 |---|---|
 | `app/agents/` | Amin triage, Amilos reply, Leila supervisor, redaction, rules, urgency, language, decision hash |
 | `app/api/` | FastAPI routes, Bearer auth dependency, rate limiting |
-| `app/domain/` | Tenants, users, sessions, tasks, usage events, export, retention, sandbox seed, API keys, webhooks |
+| `app/domain/` | Tenants, users, sessions, tasks, usage events, export, retention, sandbox seed, API keys, webhooks, buyer features (15 Section B options) |
 | `app/ingest/` | IMAP provider, fake provider, normalization, idempotency, raw store |
 | `app/policy/` | Template registry, send decision, SLA clock, business-hours calendar, approval queue, audit log, shadow mode |
 | `app/workers/` | Priority-lane queue, per-tenant quota, backpressure, dead-letter queue, traces, cost events |
 | `app/web/` | Operator desk router (`/desk/*`), dashboard, privacy endpoints |
 | `app/main.py` | FastAPI application entry point, middleware, security headers |
-| `migrations/` | Alembic versions 0001–0006 — all schema changes are here, never in import |
+| `migrations/` | Alembic versions 0001–0010 — all schema changes are here, never in import |
 | `schemas/` | JSON schemas for triage_decision, reply_draft, supervisor_decision |
 | `tests/` | Unit, contract, tenant isolation, golden messages, release checks |
-| `docs/` | INSTALL, RUNBOOK, BENCHMARK, CAPABILITY_MATRIX, THREAT_MODEL, PRIVACY_DATA_MAP, releases, diagrams |
+| `docs/` | INSTALL, RUNBOOK, BENCHMARK, CAPABILITY_MATRIX, THREAT_MODEL, PRIVACY_DATA_MAP, COMPARISON, TEST_HOUSE, INSTALL_VIDEO_SCRIPT, releases, diagrams |
 
 ---
 
@@ -263,7 +282,7 @@ service and does not enforce or verify data residency automatically. See
 python3 -m pytest tests/ -v
 ```
 
-454 tests, 0 failures (follow-up Phase 5 baseline).
+504 tests, 0 failures (follow-up Phase 7 baseline).
 
 | File | Covers |
 |---|---|
@@ -278,22 +297,25 @@ python3 -m pytest tests/ -v
 | `tests/test_commercial.py` | usage, export, retention, sandbox, API keys, webhooks |
 | `tests/test_release.py` | capability matrix, release surface |
 | `tests/test_token_policy.py` | rule-hit zero tokens, attachment exclusion, triage cache, prompt shape |
+| `tests/test_buyer_features.py` | all 15 Section B buyer options |
+| `tests/test_differentiation.py` | all 15 Section C finish items |
 
 ---
 
 ## Roadmap
 
-Phases 1–5 of the follow-up contract are closed. Remaining phases:
+Phases 1–7 of the follow-up contract are closed. Remaining phases:
 
 | Phase | Title | Status |
 |---|---|---|
 | Follow-up 6 | Cinematic README and release surface | closed |
 | Follow-up 7 | Company capabilities (15 buyer options) | closed |
-| Follow-up 8 | Differentiation pack (15 finish items) | planned |
+| Follow-up 8 | Differentiation pack (15 finish items) | closed |
 | Follow-up 9 | Test house and release 1.1.0 | planned |
 | Follow-up 10 | External proof and freeze | planned |
 
 Full release history: [`docs/releases/`](docs/releases/)
+Release timeline: [`docs/releases/timeline.md`](docs/releases/timeline.md)
 
 ---
 
@@ -336,6 +358,9 @@ Azimi Innovation Lab. It receives tenant mail, classifies it, drafts a short
 receipt, and places the work on the right queue so an operator can see what
 arrived, what was decided, and what was sent.
 
-Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)  
-Install guide: [`docs/INSTALL.md`](docs/INSTALL.md)  
+Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)
+Install guide: [`docs/INSTALL.md`](docs/INSTALL.md)
 Runbook: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+Comparison: [`docs/COMPARISON.md`](docs/COMPARISON.md)
+Test house: [`docs/TEST_HOUSE.md`](docs/TEST_HOUSE.md)
+Install video script: [`docs/INSTALL_VIDEO_SCRIPT.md`](docs/INSTALL_VIDEO_SCRIPT.md)

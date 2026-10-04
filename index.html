@@ -206,6 +206,9 @@
     .stat-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
     .stat-value { font-size: 26px; font-weight: 700; color: #1e293b; }
 
+    .kbd-hint { font-size: 11px; color: #64748b; margin-bottom: 8px; }
+    kbd { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 3px; padding: 1px 5px; font-size: 11px; font-family: monospace; }
+    .notice-loading { background: #f0f9ff; color: #0369a1; }
     .empty-row td {
       text-align: center;
       color: #94a3b8;
@@ -410,6 +413,7 @@
 
       <!-- APPROVAL -->
       <div id="secApproval" class="section">
+        <div class="kbd-hint">Keyboard: <kbd>Alt</kbd>+<kbd>A</kbd> approve focused row &nbsp;·&nbsp; <kbd>Alt</kbd>+<kbd>R</kbd> reject focused row &nbsp;·&nbsp; <kbd>↑</kbd>/<kbd>↓</kbd> move focus</div>
         <div class="card">
           <button onclick="loadApproval()" style="margin-bottom:12px">Refresh</button>
           <table>
@@ -874,6 +878,72 @@
       tbody.appendChild(tr);
     });
   }
+
+  // ── Approval keyboard navigation ──────────────────────────────────────────
+  // Alt+A = approve the focused approval row; Alt+R = reject it.
+  // Up/Down arrow keys move focus between rows in the approval section.
+  var _focusedApprovalId = null;
+
+  function _approvalRowIds() {
+    var rows = document.querySelectorAll("#approvalBody tr[id^='appr-']");
+    var ids = [];
+    rows.forEach(function(r) { ids.push(r.id.replace("appr-", "")); });
+    return ids;
+  }
+
+  function _highlightApprovalRow(id) {
+    document.querySelectorAll("#approvalBody tr").forEach(function(r) {
+      r.style.outline = "";
+    });
+    _focusedApprovalId = id;
+    if (id) {
+      var row = document.getElementById("appr-" + id);
+      if (row) { row.style.outline = "2px solid #3b82f6"; row.scrollIntoView({block:"nearest"}); }
+    }
+  }
+
+  document.addEventListener("keydown", function(e) {
+    // Only active when the Approval section is visible.
+    var apprSection = document.getElementById("secApproval");
+    if (!apprSection || !apprSection.classList.contains("active")) return;
+
+    var ids = _approvalRowIds();
+    if (!ids.length) return;
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      var idx = ids.indexOf(String(_focusedApprovalId));
+      if (e.key === "ArrowDown") idx = (idx < ids.length - 1) ? idx + 1 : 0;
+      else                        idx = (idx > 0)              ? idx - 1 : ids.length - 1;
+      _highlightApprovalRow(ids[idx]);
+      return;
+    }
+
+    if (!e.altKey) return;
+
+    if (e.key === "a" || e.key === "A") {
+      e.preventDefault();
+      var id = _focusedApprovalId || ids[0];
+      if (!id) return;
+      var btn = document.querySelector("#appr-" + id + " .btn-approve");
+      if (btn && !btn.disabled) btn.click();
+    } else if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      var id = _focusedApprovalId || ids[0];
+      if (!id) return;
+      var btn = document.querySelector("#appr-" + id + " .btn-reject");
+      if (btn && !btn.disabled) btn.click();
+    }
+  });
+
+  // When rows are loaded, auto-focus the first one.
+  var _origLoadApproval = loadApproval;
+  loadApproval = async function() {
+    await _origLoadApproval();
+    _focusedApprovalId = null;
+    var ids = _approvalRowIds();
+    if (ids.length) _highlightApprovalRow(ids[0]);
+  };
 
   // ── Init ──────────────────────────────────────────────────────────────────
   (function init() {
