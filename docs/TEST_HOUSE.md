@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
-**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab  
-**Last updated:** Follow-up Phase 8  
+**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
+**Last updated:** Follow-up Phase 9
 
 ---
 
@@ -35,6 +35,7 @@ run.
 | 7 | 2026-10-08 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 6) | 454 passed, 0 failed | README and release surface |
 | 8 | 2026-10-08 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 7) | 504 passed, 0 failed | 50 new buyer-feature tests |
 | 9 | 2026-10-09 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 8) | 600 passed, 0 failed | Differentiation pack — 96 new tests |
+| 10 | 2026-10-10 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 9) | 600 passed, 0 failed | Test-house record and 1.1.0 release notes — no new tests added this phase |
 
 ---
 

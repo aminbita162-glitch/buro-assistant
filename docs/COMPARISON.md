@@ -49,7 +49,7 @@ capabilities are marked "designed for", they are not externally verified.
 | Signed outbound webhooks (HMAC-SHA256) | ✓ verified | ✓ (docs) | ✓ (docs) | ✓ (docs) |
 | Per-tenant daily token quota | ✓ verified | n/a | n/a | n/a |
 | Shadow mode (draft stored, not sent) | ✓ verified | not documented | not documented | not documented |
-| Open-source / inspectable | ✓ (MIT) | ✗ closed source | ✗ closed source | ✗ closed source |
+| Open-source / inspectable | ✓ (proprietary — all rights reserved, Amin Azimi) | ✗ closed source | ✗ closed source | ✗ closed source |
 | Commercial sale | ✗ not done | ✓ | ✓ | ✓ |
 | Hosted service | ✗ not done | ✓ | ✓ | ✓ |
 
