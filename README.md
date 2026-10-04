@@ -1,99 +1,225 @@
 # Buro Assistant
 
+**Author:** Amin Azimi, AI Architect, Azimi Innovation Lab  
+**Current version:** 1.0.0 (follow-up Phase 5 closed)  
+**License:** see `LICENSE`
+
+---
+
 ## Contents
 
 - [What it does](#what-it-does)
+- [Architecture diagram](#architecture-diagram)
 - [Agents](#agents)
-- [Architecture](#architecture)
-- [Verified in this release](#verified-in-this-release)
-- [Designed for, not yet measured](#designed-for-not-yet-measured)
+- [File map](#file-map)
+- [Designed versus verified](#designed-versus-verified)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Tests](#tests)
-- [Release](#release)
+- [Roadmap](#roadmap)
+- [What is not claimed](#what-is-not-claimed)
+- [External links](#external-links)
 - [Author](#author)
 
 ---
 
 ## What it does
 
-Buro Assistant is a multi-tenant office mail desk. It receives messages through a configured mailbox adapter, stores them once, classifies them with fixed rules before any model call, drafts a short receipt from an approved template, sends that receipt only when the tenant policy allows, and shows the operator the inbound queue, decisions, drafts, sent mail, failures, cost, and audit trail. Tasks extracted from a message stay attached to that message and that tenant.
+Buro Assistant is a multi-tenant office mail desk. It receives messages through a
+configured mailbox adapter, stores them once with an idempotency key, classifies
+them with fixed rules before any model call, drafts a short receipt from an approved
+template, and routes the result to the operator queue. The operator sees the inbound
+queue, decisions, drafts, sent mail, failures, cost, and an append-only audit trail.
+Tasks extracted from a message stay scoped to that message and that tenant.
+
+A rule match never calls a model. Attachment bytes are never sent to a model.
+Redaction runs before every model call. Shadow mode stores a draft and does not send.
+
+---
+
+## Architecture diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  External mail server (operator-hosted)                         │
+│  IMAP / SMTP                                                    │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  app/ingest/                                                    │
+│  IMAPProvider  or  FakeProvider (no mailbox env set)            │
+│  → normalize → idempotency check → raw store                   │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  app/agents/                                                    │
+│  Amin (triage)                                                  │
+│    rule engine → rule hit? ──yes──→ decision (no model call)   │
+│                         │                                       │
+│                         no                                      │
+│                         ▼                                       │
+│    redact → language detect → urgency → model call             │
+│    schema validate → decision hash                             │
+│                         │                                       │
+│    confidence < threshold ──→ Leila (supervisor)               │
+│                         │                                       │
+│    confidence ≥ threshold ──→ Amilos (reply)                   │
+│    template registry → forbidden-phrase check → draft          │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  app/policy/                                                    │
+│  tenant send policy                                             │
+│    shadow mode ──→ draft stored, not sent                      │
+│    approval required ──→ human approval queue                  │
+│    auto-reply on ──→ outbound delivery + signed webhook        │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  app/workers/                                                   │
+│  priority-lane queue  •  quota  •  backpressure                │
+│  dead-letter replay   •  traces  •  cost events                │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  app/web/  (operator desk at /desk/*)                           │
+│  dashboard  •  inbound  •  decisions  •  drafts                │
+│  approval   •  audit    •  quota/cost •  privacy               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Full diagram source: [`docs/diagrams/architecture.txt`](docs/diagrams/architecture.txt)
 
 ---
 
 ## Agents
 
-**Amin (triage)** — Accepts a normalized message and the tenant rule pack. Returns JSON valid against `schemas/triage_decision.json`. Does not send mail and does not write billing. If a rule hits, the model client is not called. Confidence below threshold routes to Leila.
+**Amin (triage)** — Accepts a normalized message and the tenant rule pack.
+Returns JSON valid against [`schemas/triage_decision.json`](schemas/triage_decision.json).
+Does not send mail and does not write billing. If a rule hits, the model client
+is not called. Confidence below threshold routes to Leila.
 
-**Amilos (reply)** — Accepts the triage decision and an approved template. Returns JSON valid against `schemas/reply_draft.json`. Cannot invent a price, a legal promise, or a date that is not in the template variables.
+**Amilos (reply)** — Accepts the triage decision and an approved template.
+Returns JSON valid against [`schemas/reply_draft.json`](schemas/reply_draft.json).
+Cannot invent a price, a legal promise, or a date that is not in the template variables.
 
-**Leila (supervisor)** — Accepts an exception. Returns JSON valid against `schemas/supervisor_decision.json`. Allowed actions: `hold`, `request_human`, `reject`, `reroute`. Cannot send or delete.
+**Leila (supervisor)** — Accepts an exception. Returns JSON valid against
+[`schemas/supervisor_decision.json`](schemas/supervisor_decision.json).
+Allowed actions: `hold`, `request_human`, `reject`, `reroute`. Cannot send or delete.
 
-Model output that fails schema validation becomes a supervisor exception and is not written as a decision. The same tenant rules and the same normalized message, with the model disabled, produce the same decision hash.
-
----
-
-## Architecture
-
-```
-app/
-  agents/     Amin (triage), Amilos (reply), Leila (supervisor)
-  api/        routes and dependencies
-  domain/     tenants, users, sessions, tasks, usage, export, retention, sandbox, API keys, webhooks
-  ingest/     providers (IMAP, fake), normalization, idempotency
-  policy/     templates, send decision, SLA, calendar, approval queue, audit log, shadow mode
-  workers/    queue (priority lanes), quota, backpressure, dead letter, traces, cost
-  web/        operator desk router (/desk/*)
-migrations/   Alembic versions 0001–0006
-schemas/      triage_decision.json, reply_draft.json, supervisor_decision.json
-tests/        unit, contract, tenant isolation, golden messages, release checks
-docs/         INSTALL.md, RUNBOOK.md, BENCHMARK.md, CAPABILITY_MATRIX.md, releases/
-```
-
-The entry point is `app/main.py`. The server is started with `run.sh`. Schema changes are managed by Alembic migrations only; no schema change occurs on import.
+Model output that fails schema validation becomes a supervisor exception and is not
+written as a decision. The same tenant rules and the same normalized message, with
+the model disabled, produce the same decision hash.
 
 ---
 
-## Verified in this release
+## File map
 
-All fifty capability checklist rows are closed in release 1.0.0. See `docs/CAPABILITY_MATRIX.md` for the full matrix and `docs/releases/1.0.0.md` for the row-by-row test pointer list.
-
-Key verified capabilities:
-
-- Tenant isolation on every business table, with cross-tenant rejection tests
-- Idempotency, raw store, duplicate detection, attachment quarantine
-- Three-agent pipeline: rule engine, redaction, language detection, urgency lexicon, confidence threshold, schema validation, deterministic decision hash
-- Template registry with forbidden phrases, receipt template, auto-reply gate, shadow mode
-- Business-hours calendar, SLA clock, human approval queue, append-only audit log
-- Operator desk: dashboard counts, department queues, decisions, drafts, audit
-- Priority-lane work queue, backpressure, dead-letter replay, traces, per-tenant quota
-- Usage events, tenant export, retention (default 180 days), sandbox seed
-- Scoped API keys (SHA-256 hash), signed outbound webhooks (HMAC-SHA256)
+| Package | Responsibility |
+|---|---|
+| `app/agents/` | Amin triage, Amilos reply, Leila supervisor, redaction, rules, urgency, language, decision hash |
+| `app/api/` | FastAPI routes, Bearer auth dependency, rate limiting |
+| `app/domain/` | Tenants, users, sessions, tasks, usage events, export, retention, sandbox seed, API keys, webhooks |
+| `app/ingest/` | IMAP provider, fake provider, normalization, idempotency, raw store |
+| `app/policy/` | Template registry, send decision, SLA clock, business-hours calendar, approval queue, audit log, shadow mode |
+| `app/workers/` | Priority-lane queue, per-tenant quota, backpressure, dead-letter queue, traces, cost events |
+| `app/web/` | Operator desk router (`/desk/*`), dashboard, privacy endpoints |
+| `app/main.py` | FastAPI application entry point, middleware, security headers |
+| `migrations/` | Alembic versions 0001–0006 — all schema changes are here, never in import |
+| `schemas/` | JSON schemas for triage_decision, reply_draft, supervisor_decision |
+| `tests/` | Unit, contract, tenant isolation, golden messages, release checks |
+| `docs/` | INSTALL, RUNBOOK, BENCHMARK, CAPABILITY_MATRIX, THREAT_MODEL, PRIVACY_DATA_MAP, releases, diagrams |
 
 ---
 
-## Designed for, not yet measured
+## Designed versus verified
 
-- Many tenants and horizontal workers
-- Horizontal queue workers with priority lanes
-- Per-tenant daily quota and backpressure
+| Capability | Designed for | Verified |
+|---|---|---|
+| Tenant isolation on every business table | ✓ | ✓ `tests/test_tenancy.py` |
+| Cross-tenant rejection tests | ✓ | ✓ `tests/test_tenancy.py` |
+| Idempotency key (provider message id + tenant) | ✓ | ✓ `tests/test_ingest.py` |
+| Immutable raw message store | ✓ | ✓ `tests/test_ingest.py` |
+| IMAP adapter, credentials from environment only | ✓ | ✓ `tests/test_ingest.py` |
+| Provider-neutral normalized message | ✓ | ✓ `tests/test_ingest.py` |
+| Tenant rule pack (domain, subject, department) | ✓ | ✓ `tests/test_agents.py` |
+| Confidence threshold → Leila | ✓ | ✓ `tests/test_agents.py` |
+| Duplicate detection by Message-Id and subject | ✓ | ✓ `tests/test_ingest.py` |
+| Language detection | ✓ | ✓ `tests/test_agents.py` |
+| Urgency lexicon with tenant overrides | ✓ | ✓ `tests/test_agents.py` |
+| Attachment allowlist and quarantine | ✓ | ✓ `tests/test_ingest.py` |
+| Redaction before model call | ✓ | ✓ `tests/test_agents.py` |
+| Prompt and schema version on every decision | ✓ | ✓ `tests/test_agents.py` |
+| Schema validation of agent output | ✓ | ✓ `tests/test_agents.py` |
+| Template registry with forbidden phrases | ✓ | ✓ `tests/test_policy.py` |
+| Auto-reply off unless tenant enables it | ✓ | ✓ `tests/test_policy.py` |
+| Receipt template | ✓ | ✓ `tests/test_policy.py` |
+| Business-hours calendar per tenant | ✓ | ✓ `tests/test_policy.py` |
+| SLA clock from ingest time | ✓ | ✓ `tests/test_policy.py` |
+| Human approval queue | ✓ | ✓ `tests/test_policy.py` |
+| Append-only audit log | ✓ | ✓ `tests/test_policy.py` |
+| Dashboard counts (received, classified, drafted, sent, held, failed) | ✓ | ✓ `tests/test_desk.py` |
+| Department queues | ✓ | ✓ `tests/test_desk.py` |
+| Cost and token fields on model calls | ✓ | ✓ `tests/test_workers.py` |
+| Per-tenant daily token quota | ✓ | ✓ `tests/test_workers.py` |
+| Backpressure when queue depth exceeds cap | ✓ | ✓ `tests/test_workers.py` |
+| Dead-letter queue and replay | ✓ | ✓ `tests/test_workers.py` |
+| Priority lanes (critical > high > medium > low) | ✓ | ✓ `tests/test_workers.py` |
+| Traces around ingest, decide, draft, and send | ✓ | ✓ `tests/test_workers.py` |
+| Live and ready health checks | ✓ | ✓ `tests/test_security.py` |
+| Alembic migrations; no schema change on import | ✓ | ✓ `tests/test_security.py` |
+| Argon2id password hashing | ✓ | ✓ `tests/test_security.py` |
+| Session table, hashed token, expiry, rotation | ✓ | ✓ `tests/test_security.py` |
+| Rate limits on signup, login, and model routes | ✓ | ✓ `tests/test_security.py` |
+| Security headers and content security policy | ✓ | ✓ `tests/test_security.py` |
+| CORS allowlist from environment | ✓ | ✓ `tests/test_security.py` |
+| Message and task fields rendered as text, not HTML | ✓ | ✓ `tests/test_security.py` |
+| Capability matrix | ✓ | ✓ `tests/test_release.py` |
+| Usage events | ✓ | ✓ `tests/test_commercial.py` |
+| Tenant data export | ✓ | ✓ `tests/test_commercial.py` |
+| Retention (default 180 days) | ✓ | ✓ `tests/test_commercial.py` |
+| Sandbox tenant seed command | ✓ | ✓ `tests/test_commercial.py` |
+| Scoped API keys, stored hashed | ✓ | ✓ `tests/test_commercial.py` |
+| Signed outbound webhooks (HMAC-SHA256) | ✓ | ✓ `tests/test_commercial.py` |
+| Fifty golden messages with expected decisions | ✓ | ✓ `tests/test_agents.py` |
+| Contract tests for three schemas | ✓ | ✓ `tests/test_contracts.py` |
+| Shadow mode: draft stored, not sent | ✓ | ✓ `tests/test_policy.py` |
+| Runbook | ✓ | ✓ `docs/RUNBOOK.md` |
+| Install, backup, restore, threat model, release notes | ✓ | ✓ `docs/INSTALL.md` |
+| Rule before model — zero tokens on rule hit | ✓ | ✓ `tests/test_token_policy.py` |
+| Attachment bytes never sent to model | ✓ | ✓ `tests/test_token_policy.py` |
+| Prompt body clipped to ≤ 200 chars | ✓ | ✓ `tests/test_token_policy.py` |
+| Rule pack hash in every model prompt | ✓ | ✓ `tests/test_token_policy.py` |
+| Triage cache for rule-hit inputs | ✓ | ✓ `tests/test_token_policy.py` |
+| Live mailbox poll (IMAP worker loop) | ✓ | designed for — not yet externally measured |
+| Many tenants, horizontal workers | ✓ | designed for — not yet externally measured |
+| Per-tenant quota backpressure at scale | ✓ | designed for — not yet externally measured |
 
-These capabilities are designed into the architecture. Measured numbers are in `docs/BENCHMARK.md`.
+Full matrix: [`docs/CAPABILITY_MATRIX.md`](docs/CAPABILITY_MATRIX.md)
 
 ---
 
 ## Quick start
 
 ```bash
+git clone <repo-url>
+cd buro-assistant
 cp .env.example .env
 # Edit .env — set DATABASE_URL and OPENAI_API_KEY
 pip install -r requirements.txt
 ./run.sh
 ```
 
-The app starts without an `OPENAI_API_KEY`. Only `POST /assistant`, `POST /analyze`, and `POST /tasks/{id}/ai-update` require a live key. All other routes — ingest, desk, health, auth, policy, and agents via `FakeModel` — work without one.
+The app starts without `OPENAI_API_KEY`. Only `POST /assistant`, `POST /analyze`,
+and `POST /tasks/{id}/ai-update` require a live key. All other routes — ingest,
+desk, health, auth, policy, and agents via `FakeModel` — work without one.
 
-The operator UI is served at `http://localhost:8000`.
+The operator desk is at `http://localhost:8000`.
 
 To seed a sandbox tenant:
 
@@ -101,11 +227,18 @@ To seed a sandbox tenant:
 python -m app.domain.sandbox
 ```
 
+To run migrations manually:
+
+```bash
+alembic upgrade head
+```
+
 ---
 
 ## Configuration
 
-All configuration is read from environment variables. See `.env.example` for the full list. Secrets must never be committed to the repository.
+All configuration is read from environment variables. See [`.env.example`](.env.example)
+for the full list. Never commit `.env` to version control.
 
 | Variable | Purpose |
 |---|---|
@@ -118,6 +251,10 @@ All configuration is read from environment variables. See `.env.example` for the
 | `IMAP_USER` | IMAP username |
 | `IMAP_PASSWORD` | IMAP password |
 
+Database region is operator-controlled. Buro Assistant does not operate a hosted
+service and does not enforce or verify data residency automatically. See
+[`docs/INSTALL.md`](docs/INSTALL.md) and [`docs/PRIVACY_DATA_MAP.md`](docs/PRIVACY_DATA_MAP.md).
+
 ---
 
 ## Tests
@@ -126,38 +263,79 @@ All configuration is read from environment variables. See `.env.example` for the
 python3 -m pytest tests/ -v
 ```
 
-329 tests, 0 failures (release 1.0.0).
+454 tests, 0 failures (follow-up Phase 5 baseline).
 
-Test files and what they cover:
-
-| File | Rows covered |
+| File | Covers |
 |---|---|
-| `tests/test_security.py` | 31, 33, 34, 35, 36, 37, 38 |
-| `tests/test_tenancy.py` | 1, 2, 32 |
-| `tests/test_ingest.py` | 3, 4, 5, 6, 9, 12 |
-| `tests/test_agents.py` | 7, 8, 10, 11, 13, 14, 15, 46 |
-| `tests/test_contracts.py` | 47 |
-| `tests/test_policy.py` | 16, 17, 18, 19, 20, 21, 22, 48 |
-| `tests/test_desk.py` | 23, 24 |
-| `tests/test_workers.py` | 25, 26, 27, 28, 29, 30 |
-| `tests/test_commercial.py` | 40, 41, 42, 43, 44, 45 |
-| `tests/test_release.py` | 39, 49, 50 |
+| `tests/test_security.py` | security headers, rate limits, health, migrations |
+| `tests/test_tenancy.py` | tenant isolation, cross-tenant rejection |
+| `tests/test_ingest.py` | idempotency, raw store, IMAP adapter, normalization |
+| `tests/test_agents.py` | rule engine, triage, language, urgency, golden messages |
+| `tests/test_contracts.py` | JSON schema contracts for three agent schemas |
+| `tests/test_policy.py` | templates, send decision, SLA, approval queue, audit, shadow mode |
+| `tests/test_desk.py` | dashboard counts, department queues |
+| `tests/test_workers.py` | queue, quota, backpressure, dead letter, traces, cost |
+| `tests/test_commercial.py` | usage, export, retention, sandbox, API keys, webhooks |
+| `tests/test_release.py` | capability matrix, release surface |
+| `tests/test_token_policy.py` | rule-hit zero tokens, attachment exclusion, triage cache, prompt shape |
 
 ---
 
-## Release
+## Roadmap
 
-Development restart: 2026-10-03.
-Current version: 1.0.0.
+Phases 1–5 of the follow-up contract are closed. Remaining phases:
 
-Release notes are in `docs/releases/`. The full 50-row checklist with test pointers is in `docs/releases/1.0.0.md`.
+| Phase | Title | Status |
+|---|---|---|
+| Follow-up 6 | Cinematic README and release surface | in progress |
+| Follow-up 7 | Company capabilities (15 buyer options) | planned |
+| Follow-up 8 | Differentiation pack (15 finish items) | planned |
+| Follow-up 9 | Test house and release 1.1.0 | planned |
+| Follow-up 10 | External proof and freeze | planned |
 
-Install, backup, restore, and threat model: `docs/INSTALL.md`.
-Runbook (incident, quota breach, bad template): `docs/RUNBOOK.md`.
-Benchmark: `docs/BENCHMARK.md`.
+Full release history: [`docs/releases/`](docs/releases/)
+
+---
+
+## What is not claimed
+
+- **No hosted service.** Buro Assistant is self-hosted by the operator.
+  There is no SaaS offering, no shared infrastructure, and no uptime guarantee
+  from Azimi Innovation Lab.
+- **No commercial sale.** This repository is not a product offered for purchase
+  or subscription.
+- **No factory-ready certification.** Designed-for capabilities are marked in the
+  table above. They are not verified unless a passing test exists in this repository.
+- **No throughput guarantee.** Benchmark figures are from an in-memory SQLite
+  development machine. Production PostgreSQL performance is the operator's
+  responsibility. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+- **No EU data-residency guarantee.** The database region is operator-controlled.
+  See [`docs/PRIVACY_DATA_MAP.md`](docs/PRIVACY_DATA_MAP.md).
+- **No MFA.** Multi-factor authentication is outside the scope of this codebase;
+  it is the operator's hosting layer's responsibility.
+
+---
+
+## External links
+
+- [FastAPI](https://fastapi.tiangolo.com/) — ASGI web framework used for the API layer
+- [Alembic](https://alembic.sqlalchemy.org/) — database migration tool
+- [SQLAlchemy](https://www.sqlalchemy.org/) — ORM and query builder
+- [Argon2-cffi](https://argon2-cffi.readthedocs.io/) — password hashing
+- [OpenAI API](https://platform.openai.com/docs) — model provider (requires operator key)
+- [slowapi](https://github.com/laurentS/slowapi) — rate limiting for FastAPI
+
+No private links, invitation-only URLs, or internal tooling URLs appear in this section.
 
 ---
 
 ## Author
 
-Buro Assistant is an office mail desk built by Amin Azimi, AI Architect, Azimi Innovation Lab. It receives tenant mail, classifies it, drafts a short receipt, and places the work on the right queue so an operator can see what arrived, what was decided, and what was sent.
+Buro Assistant is an office mail desk built by Amin Azimi, AI Architect,
+Azimi Innovation Lab. It receives tenant mail, classifies it, drafts a short
+receipt, and places the work on the right queue so an operator can see what
+arrived, what was decided, and what was sent.
+
+Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)  
+Install guide: [`docs/INSTALL.md`](docs/INSTALL.md)  
+Runbook: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)

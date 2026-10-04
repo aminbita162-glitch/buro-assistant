@@ -1,0 +1,179 @@
+Buro Assistant — Architecture Diagram
+Author: Amin Azimi, AI Architect, Azimi Innovation Lab
+Last updated: Follow-up Phase 6
+
+=======================================================================
+  EXTERNAL BOUNDARY
+=======================================================================
+
+  [Sender's mail server]
+          │  IMAP
+          ▼
+
+=======================================================================
+  INGEST  (app/ingest/)
+=======================================================================
+
+  IMAPProvider          FakeProvider
+  (IMAP_HOST set)  or  (no mailbox env)
+          │
+          ▼
+  normalize()           → NormalizedMessage
+  idempotency_check()   → skip if (provider_message_id, tenant_id) seen
+  store_raw()           → messages table (immutable)
+  attachment_scan()     → attachment_state: allowed | quarantine
+
+=======================================================================
+  PIPELINE  (app/pipeline.py)
+=======================================================================
+
+          │
+          ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │  Amin — triage  (app/agents/amin.py)                         │
+  │                                                               │
+  │  1. Build rule pack from tenant settings                      │
+  │  2. rule_engine() ──hit──→ deterministic decision             │
+  │                   │         (model NOT called)                │
+  │                   no-hit                                      │
+  │                   │                                           │
+  │  3. redact()      → remove PII from subject + body clip       │
+  │  4. detect_language()                                         │
+  │  5. score_urgency()                                           │
+  │  6. model.call()  → raw JSON                                  │
+  │  7. validate against schemas/triage_decision.json             │
+  │  8. compute decision_hash()                                   │
+  │                                                               │
+  │  confidence < threshold ──→ Leila (supervisor)               │
+  │  confidence ≥ threshold ──→ Amilos (reply)                   │
+  └───────────────────────────────────────────────────────────────┘
+          │
+          ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │  Amilos — reply  (app/agents/amilos.py)                      │
+  │                                                               │
+  │  1. Load approved template from template registry             │
+  │  2. Fill template variables                                   │
+  │  3. Forbidden-phrase check (no invented prices / dates)       │
+  │  4. Validate against schemas/reply_draft.json                 │
+  └───────────────────────────────────────────────────────────────┘
+          │
+          ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │  Leila — supervisor  (app/agents/leila.py)   [exception path] │
+  │                                                               │
+  │  Actions: hold | request_human | reject | reroute            │
+  │  Cannot send. Cannot delete.                                  │
+  │  Validates against schemas/supervisor_decision.json           │
+  └───────────────────────────────────────────────────────────────┘
+
+=======================================================================
+  POLICY  (app/policy/)
+=======================================================================
+
+          │
+          ▼
+  send_decision()
+    │
+    ├─ shadow_mode = true  ──→ store draft, do NOT send
+    │
+    ├─ approval_required  ──→ human approval queue
+    │                          (operator approves on desk)
+    │
+    └─ auto_reply = true  ──→ deliver outbound
+                               signed webhook (HMAC-SHA256)
+                               X-Buro-Signature header
+
+  Business-hours calendar: SLA clock starts at ingest_time
+  Audit log: append-only, every decision recorded
+
+=======================================================================
+  WORKERS  (app/workers/)
+=======================================================================
+
+  Priority-lane queue
+    critical > high > medium > low
+
+  Quota
+    per-tenant daily_token_quota
+    QuotaExceeded raised before model call
+
+  Backpressure
+    queue_depth_cap per tenant
+    BackpressureError on overflow
+
+  Dead-letter queue
+    failed jobs land here
+    replay re-enqueues with one DB round-trip
+
+  Traces
+    one DB INSERT per stage: ingest | decide | draft | send
+
+  Cost events
+    usage_event rows (unit = "tokens") written on every pipeline path
+    rule-hit path writes zero-token event
+
+=======================================================================
+  OPERATOR DESK  (app/web/   index.html)
+=======================================================================
+
+  GET /desk/dashboard    counts: received, classified, drafted,
+                                 sent, held, failed
+  GET /desk/inbound      inbound queue (tenant-scoped)
+  GET /desk/decisions    triage decisions
+  GET /desk/drafts       reply drafts awaiting review
+  GET /desk/approval     human approval queue
+  GET /desk/audit        append-only audit log
+  GET /desk/cost         daily token usage + quota + cost
+  GET /desk/privacy/*    GDPR export and erasure
+
+  All desk endpoints require Bearer token (tenant-scoped session).
+  Fields rendered with textContent, never innerHTML.
+
+=======================================================================
+  DATA LAYER  (migrations/   SQLAlchemy)
+=======================================================================
+
+  Schema changes: Alembic only (versions 0001–0006)
+  No CREATE TABLE or ALTER TABLE on import
+
+  Key tables:
+    tenants           tenant settings, quota, rule pack
+    users             Argon2id password hash, tenant FK
+    sessions          SHA-256 hashed token, expiry, rotation
+    messages          raw store, idempotency key, tenant FK
+    triage_decisions  decision hash, prompt version, schema version
+    reply_drafts      template id, draft body, status
+    approval_queue    pending human approvals
+    audit_log         append-only event rows
+    work_queue        priority, status, tenant FK
+    dead_letter       failed jobs with error detail
+    usage_events      token counts, cost, tenant FK
+    quotas            per-tenant daily quota and usage
+
+=======================================================================
+  SECURITY BOUNDARIES
+=======================================================================
+
+  Credentials:
+    IMAP_PASSWORD     → env var only; _SecretFilter on logger
+    OPENAI_API_KEY    → env var only; never in any response
+    DATABASE_URL      → env var only; never logged
+    API keys          → stored as SHA-256 hash; plaintext shown once
+    Session tokens    → stored as SHA-256 hash; raw in Bearer header
+
+  Headers (every response):
+    X-Content-Type-Options: nosniff
+    X-Frame-Options: DENY
+    Content-Security-Policy: frame-ancestors 'none'
+
+  Rate limits (slowapi):
+    /auth/login       10 / minute
+    /auth/signup       5 / minute
+    /assistant         varies
+
+  See docs/THREAT_MODEL.md for the full STRIDE analysis.
+
+=======================================================================
+  END OF DIAGRAM
+=======================================================================
