@@ -30,8 +30,8 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 20 | SLA clock from ingest time | ✓ Phase 6 | ✓ Phase 6 |
 | 21 | Human approval queue | ✓ Phase 6 | ✓ Phase 6 |
 | 22 | Append-only audit log | ✓ Phase 6 | ✓ Phase 6 |
-| 23 | Dashboard counts: received, classified, drafted, sent, held, failed | Phase 7 | — |
-| 24 | Department queues | Phase 7 | — |
+| 23 | Dashboard counts: received, classified, drafted, sent, held, failed | ✓ Phase 7 | ✓ Phase 7 |
+| 24 | Department queues | ✓ Phase 7 | ✓ Phase 7 |
 | 25 | Cost and token fields on model calls | Phase 8 | — |
 | 26 | Per-tenant daily quota | Phase 8 | — |
 | 27 | Backpressure when queue depth exceeds tenant cap | Phase 8 | — |
