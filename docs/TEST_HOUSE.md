@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Follow-up Phase 9
+**Last updated:** Follow-up Phase 10
 
 ---
 
@@ -36,14 +36,18 @@ run.
 | 8 | 2026-10-08 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 7) | 504 passed, 0 failed | 50 new buyer-feature tests |
 | 9 | 2026-10-09 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 8) | 600 passed, 0 failed | Differentiation pack — 96 new tests |
 | 10 | 2026-10-10 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 9) | 600 passed, 0 failed | Test-house record and 1.1.0 release notes — no new tests added this phase |
+| 11 | 2026-10-11 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 10) | 600 passed, 0 failed | External test script written; roadmap frozen — no new tests added this phase |
 
 ---
 
 ## External test runs
 
-No external test run has been performed. The external test script is planned for
-Follow-up Phase 10. Until that run is recorded here with a result, the claim
-"a second account can install and verify this" is not made.
+| # | Date | Actor | Action | Result | Notes |
+|---|---|---|---|---|---|
+| — | not run | — | `bash docs/EXTERNAL_TEST.sh` | not run | Script written in Follow-up Phase 10. When a second account runs it, this row is replaced with the actual date, actor, and result. |
+
+The claim "a second account has installed and verified this" is not made until
+this row is updated with a recorded result.
 
 ---
 
@@ -75,6 +79,7 @@ recorded here.
 | `tests/test_webhook_delivery.py` | Signed webhook delivery, retries, delivery log | Follow-up 2 |
 | `tests/test_buyer_features.py` | All 15 Section B buyer options | Follow-up 7 |
 | `tests/test_differentiation.py` | All 15 Section C finish items | Follow-up 8 |
+| `docs/EXTERNAL_TEST.sh` | External install-and-verify script (not a test file; run manually) | Follow-up 10 |
 
 ---
 
