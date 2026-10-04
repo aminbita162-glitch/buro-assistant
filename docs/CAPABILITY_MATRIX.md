@@ -56,8 +56,8 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 46 | Fifty synthetic golden messages with expected decisions | ✓ Phase 5 | ✓ Phase 5 |
 | 47 | Contract tests for the three schemas | ✓ Phase 5 | ✓ Phase 5 |
 | 48 | Shadow mode that stores a draft and does not send | ✓ Phase 6 | ✓ Phase 6 |
-| 49 | Runbook for incident, quota breach, and bad template | Phase 10 | — |
-| 50 | Install, backup, restore, threat model, and release notes | Phase 10 | — |
+| 49 | Runbook for incident, quota breach, and bad template | ✓ Phase 10 | ✓ Phase 10 |
+| 50 | Install, backup, restore, threat model, and release notes | ✓ Phase 10 | ✓ Phase 10 |
 
 ---
 
