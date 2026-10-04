@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Phase 5 (Audit hash chain)
+**Last updated:** Phase 6 (Desk signals)
 
 ---
 
@@ -47,6 +47,7 @@ run.
 | 19 | 2026-10-19 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 3 — local model route) | 762 passed, 0 failed | Local model route — 15 new tests |
 | 20 | 2026-10-20 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 4 — OAuth mailbox boundary) | 779 passed, 0 failed | OAuth mailbox boundary — 17 new tests |
 | 21 | 2026-10-21 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 5 — audit hash chain) | 797 passed, 0 failed | Audit hash chain — 18 new tests |
+| 22 | 2026-10-22 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 6 — desk signals) | 842 passed, 0 failed | Desk signals — 45 new tests |
 
 ---
 
@@ -99,6 +100,7 @@ recorded here.
 | `tests/test_local_model.py` | Local model flag: is_local_model_enabled, FakeLocalModel client, pipeline routing for both flag states, rule-hit zero-model path | Phase 3 |
 | `tests/test_oauth_mailbox.py` | OAuth mailbox port: OAuthMailboxPort interface, FakeOAuthProvider, factory selection (tokens absent → fake, partial env → fake, app still runs) | Phase 4 |
 | `tests/test_audit_hash_chain.py` | Audit hash chain: prev_hash write, ZERO_HASH sentinel, verify_chain (intact and broken), pre-chain NULL rows excluded, tenant isolation | Phase 5 |
+| `tests/test_desk_signals.py` | Desk signals: daily digest shadow, semantic duplicate flag, attachment text extraction, dissatisfied-tone flag routing to Leila | Phase 6 |
 
 ---
 

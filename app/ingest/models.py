@@ -7,6 +7,7 @@ Rows closed:
   9  – duplicate detection: message_id_header + subject_normalized unique per tenant
   12 – attachment_state: clean | quarantine | none
   Phase 1 – sender authentication: spf, dkim, dmarc stored per message
+  Phase 6 – semantic_duplicate flag (bool); dissatisfied_tone flag (bool)
 """
 from __future__ import annotations
 
@@ -59,6 +60,14 @@ class Message(Base):
     auth_spf = Column(String, nullable=False, default="not_run")
     auth_dkim = Column(String, nullable=False, default="not_run")
     auth_dmarc = Column(String, nullable=False, default="not_run")
+
+    # Phase 6 – desk signals.
+    # semantic_duplicate: True when body semantics suggest a near-duplicate of
+    #   an existing message.  Set as a flag only; no second message is created.
+    # dissatisfied_tone: True when the body signals customer dissatisfaction.
+    #   When True the pipeline routes to Leila and does not send.
+    semantic_duplicate = Column(Boolean, nullable=False, default=False)
+    dissatisfied_tone = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         # Row 3 – idempotency key.
