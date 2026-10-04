@@ -11,6 +11,8 @@ Rules
 - Tokens and cost are recorded only when a model is actually called.
 - Send is off unless the tenant policy_config has ``auto_reply_enabled: True``.
 - Quarantine and duplicate messages are returned immediately without agent calls.
+- Plan capability is checked before any agent or model call (Commercial Phase 4).
+  A plan refusal produces outcome="plan_refused" and costs zero tokens.
 
 Returns a :class:`PipelineResult` describing what happened.
 """
@@ -33,6 +35,13 @@ from app.policy.shadow import store_draft
 from app.policy.templates import DEFAULT_REGISTRY, RECEIPT_TEMPLATE_ID, build_receipt_variables
 from app.workers.cost import CostRecord, null_cost
 from app.domain.usage import emit as emit_usage
+from app.domain.plan_rules import (
+    check_plan_capability,
+    CAP_AGENT_AMIN,
+    CAP_AGENT_AMILOS,
+    CAP_MODEL,
+)
+from app.domain.subscription import get_subscription, refresh_status
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +52,7 @@ from app.domain.usage import emit as emit_usage
 class PipelineResult:
     """Outcome of one pipeline run."""
 
-    #: "new" | "duplicate" | "quarantine" | "no_draft" | "draft" | "approval" | "send" | "error"
+    #: "new" | "duplicate" | "quarantine" | "no_draft" | "draft" | "approval" | "send" | "error" | "plan_refused"
     outcome: str
 
     #: Ingest result code: "new" | "duplicate" | "quarantine"
@@ -149,6 +158,45 @@ def run_pipeline(
             note=f"Message {ingest_result}; pipeline stopped.",
         )
 
+    # ---- 1b. Plan capability check — Amin (triage agent) ----
+    # Rule hits do not call a model so cost is zero. We still check CAP_AGENT_AMIN
+    # here because even a rule-hit path runs the Amin agent code. CAP_MODEL is
+    # checked separately only when a model call would actually be made (triage_model
+    # is not None). A refusal costs zero tokens.
+    # When no subscription record exists, the check is skipped — the tenant
+    # pre-dates the commercial phase or is not subject to plan gating.
+    sub = get_subscription(db, msg.tenant_id)
+    if sub is not None:
+        sub = refresh_status(db, sub)
+
+        refusal = check_plan_capability(
+            CAP_AGENT_AMIN, sub.plan_code, sub.status,
+            sub.tokens_used or 0, sub.token_cap or 0,
+        )
+        if refusal is not None:
+            return PipelineResult(
+                outcome="plan_refused",
+                ingest_result=ingest_result,
+                message=message,
+                cost=null_cost(),
+                note=f"plan refusal: {refusal.reason}",
+            )
+
+        # When a triage model would be called, also check CAP_MODEL.
+        if triage_model is not None:
+            refusal = check_plan_capability(
+                CAP_MODEL, sub.plan_code, sub.status,
+                sub.tokens_used or 0, sub.token_cap or 0,
+            )
+            if refusal is not None:
+                return PipelineResult(
+                    outcome="plan_refused",
+                    ingest_result=ingest_result,
+                    message=message,
+                    cost=null_cost(),
+                    note=f"plan refusal: {refusal.reason}",
+                )
+
     # ---- 2. Triage (Amin) ----
     tracked_triage = _TrackingModel(triage_model, triage_model_name) if triage_model else None
 
@@ -169,6 +217,24 @@ def run_pipeline(
     action = triage_decision.get("action", "hold")
 
     if action == "draft_reply":
+        # ---- 3a. Plan capability check — Amilos (draft agent) ----
+        # Only check when a subscription record exists (same skip rule as Amin check).
+        if sub is not None:
+            refusal = check_plan_capability(
+                CAP_AGENT_AMILOS, sub.plan_code, sub.status,
+                sub.tokens_used or 0, sub.token_cap or 0,
+            )
+            if refusal is not None:
+                _emit_cost_event(db, msg.tenant_id, triage_cost, reference_id=message.id)
+                return PipelineResult(
+                    outcome="plan_refused",
+                    ingest_result=ingest_result,
+                    message=message,
+                    triage_decision=triage_decision,
+                    cost=triage_cost,
+                    note=f"plan refusal: {refusal.reason}",
+                )
+
         # Build reply via Amilos using the receipt template.
         tracked_draft = _TrackingModel(draft_model, draft_model_name) if draft_model else None
 

@@ -302,19 +302,27 @@ python3 -m pytest tests/ -v
 
 ---
 
+## Commercial status
+
+**Sale wiring is in progress.** The plan catalogue and subscription record are implemented. Payment collection is not yet wired; the payment boundary uses a fake adapter until a gateway secret is present in the environment. No card data is stored.
+
+**Hosting is not offered.** Buro Assistant is self-hosted by the operator. Azimi Innovation Lab does not operate a hosted service, shared infrastructure, or a SaaS offering.
+
+---
+
 ## Roadmap
 
-Phases 1–7 of the follow-up contract are closed. Remaining phases:
+Commercial contract phases:
 
 | Phase | Title | Status |
 |---|---|---|
-| Follow-up 6 | Cinematic README and release surface | closed |
-| Follow-up 7 | Company capabilities (15 buyer options) | closed |
-| Follow-up 8 | Differentiation pack (15 finish items) | closed |
-| Follow-up 9 | Test house and release 1.1.0 | planned |
-| Follow-up 10 | External proof and freeze | planned |
+| Commercial 1 | Plan and trial state | closed |
+| Commercial 2 | Gateway boundary | closed |
+| Commercial 3 | Enforce the three plans | closed |
+| Commercial 4 | Operator surface | closed |
+| Commercial 5 | Record and freeze | planned |
 
-Full release history: [`docs/releases/`](docs/releases/)
+Follow-up phases 1–10 are closed. Full release history: [`docs/releases/`](docs/releases/)
 Release timeline: [`docs/releases/timeline.md`](docs/releases/timeline.md)
 
 ---

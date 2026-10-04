@@ -582,6 +582,116 @@ def privacy_erase(authorization: Optional[str] = Header(default=None)):
 
 
 # ---------------------------------------------------------------------------
+# Commercial Phase 4 — Operator surface: plan status
+# ---------------------------------------------------------------------------
+
+@router.get("/plan")
+def desk_plan(authorization: Optional[str] = Header(default=None)):
+    """
+    Return the tenant's current plan state for the operator desk.
+
+    Fields
+    ------
+    plan_code       : "trial" | "desk" | "mail" | "agents"
+    status          : "trial" | "active" | "expired" | "cancelled"
+    trial_days_left : integer days remaining in trial window (0 when not on trial or expired)
+    token_cap       : per-billing-period token cap
+    tokens_used     : tokens consumed this billing period
+    choose_plan     : True when status is expired or cancelled — desk shows choose-plan state
+    plans_available : list of available plan names and prices (no card field)
+
+    The desk has no card field.  Payment wiring is in progress.  Hosting is not offered.
+    """
+    from app.main import safe_db_error_message
+    from app.domain.subscription import (
+        get_subscription,
+        refresh_status,
+        STATUS_TRIAL,
+        STATUS_EXPIRED,
+        STATUS_CANCELLED,
+        TRIAL_DAYS,
+    )
+    from datetime import datetime, timezone
+
+    db, user = _open_db_and_auth(authorization)
+    try:
+        sub = get_subscription(db, user.tenant_id)
+        if sub is None:
+            # No subscription row: treat as expired so the desk shows choose-plan.
+            return {
+                "tenant_id": user.tenant_id,
+                "plan_code": "trial",
+                "status": "expired",
+                "trial_days_left": 0,
+                "token_cap": 0,
+                "tokens_used": 0,
+                "choose_plan": True,
+                "plans_available": _plan_catalogue(),
+            }
+
+        sub = refresh_status(db, sub)
+
+        trial_days_left = 0
+        if sub.status == STATUS_TRIAL and sub.trial_end is not None:
+            now = datetime.now(timezone.utc)
+            end = sub.trial_end
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            remaining = (end - now).total_seconds()
+            trial_days_left = max(0, int(remaining // 86400))
+
+        choose_plan = sub.status in (STATUS_EXPIRED, STATUS_CANCELLED)
+
+        return {
+            "tenant_id": user.tenant_id,
+            "plan_code": sub.plan_code,
+            "status": sub.status,
+            "trial_days_left": trial_days_left,
+            "token_cap": sub.token_cap,
+            "tokens_used": sub.tokens_used,
+            "choose_plan": choose_plan,
+            "plans_available": _plan_catalogue(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(exc))
+    finally:
+        db.close()
+
+
+def _plan_catalogue() -> list:
+    """
+    Static plan catalogue shown by the desk.  No card field.
+    Prices are list prices from DIRECTIVE.txt.
+    Sale wiring is in progress.  Hosting is not offered.
+    """
+    return [
+        {
+            "code": "desk",
+            "name": "Desk",
+            "price_eur_month": 65,
+            "band": "50–80",
+            "description": "Shared desk. No model, no three agents.",
+        },
+        {
+            "code": "mail",
+            "name": "Mail",
+            "price_eur_month": 149,
+            "band": "80–200",
+            "description": "Desk plus mailbox intake. Model stays off.",
+        },
+        {
+            "code": "agents",
+            "name": "Agents",
+            "price_eur_month": 270,
+            "band": "200–320",
+            "description": "Amin, Amilos, and Leila, with a monthly token cap.",
+        },
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Task list (existing task list, re-exposed at desk path)
 # ---------------------------------------------------------------------------
 
