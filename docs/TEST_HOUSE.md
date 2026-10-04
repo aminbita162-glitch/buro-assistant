@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Phase 4 (OAuth mailbox boundary)
+**Last updated:** Phase 5 (Audit hash chain)
 
 ---
 
@@ -46,6 +46,7 @@ run.
 | 18 | 2026-10-18 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 2 — bounded thread context) | 747 passed, 0 failed | Bounded thread context — 22 new tests |
 | 19 | 2026-10-19 | Amin Azizi | `python3 -m pytest tests/ -q` (Phase 3 — local model route) | 762 passed, 0 failed | Local model route — 15 new tests |
 | 20 | 2026-10-20 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 4 — OAuth mailbox boundary) | 779 passed, 0 failed | OAuth mailbox boundary — 17 new tests |
+| 21 | 2026-10-21 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 5 — audit hash chain) | 797 passed, 0 failed | Audit hash chain — 18 new tests |
 
 ---
 
@@ -97,6 +98,7 @@ recorded here.
 | `tests/test_thread_context.py` | Thread context: fetch, 200-char cap, PII redaction, tenant isolation, rule-hit zero tokens, prompt version | Phase 2 |
 | `tests/test_local_model.py` | Local model flag: is_local_model_enabled, FakeLocalModel client, pipeline routing for both flag states, rule-hit zero-model path | Phase 3 |
 | `tests/test_oauth_mailbox.py` | OAuth mailbox port: OAuthMailboxPort interface, FakeOAuthProvider, factory selection (tokens absent → fake, partial env → fake, app still runs) | Phase 4 |
+| `tests/test_audit_hash_chain.py` | Audit hash chain: prev_hash write, ZERO_HASH sentinel, verify_chain (intact and broken), pre-chain NULL rows excluded, tenant isolation | Phase 5 |
 
 ---
 
