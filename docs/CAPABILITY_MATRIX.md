@@ -47,12 +47,12 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 37 | CORS allowlist from the environment | ✓ Phase 2 | ✓ Phase 2 |
 | 38 | Message and task fields rendered as text, not HTML | ✓ Phase 2 | ✓ Phase 2 |
 | 39 | Capability matrix with Designed for and Verified columns | ✓ Phase 1 | ✓ Phase 1 |
-| 40 | Usage events | Phase 9 | — |
-| 41 | Tenant data export job | Phase 9 | — |
-| 42 | Retention field, default 180 days | Phase 9 | — |
-| 43 | Sandbox tenant seed command | Phase 9 | — |
-| 44 | Scoped API keys, stored hashed | Phase 9 | — |
-| 45 | Signed outbound webhooks | Phase 9 | — |
+| 40 | Usage events | ✓ Phase 9 | ✓ Phase 9 |
+| 41 | Tenant data export job | ✓ Phase 9 | ✓ Phase 9 |
+| 42 | Retention field, default 180 days | ✓ Phase 9 | ✓ Phase 9 |
+| 43 | Sandbox tenant seed command | ✓ Phase 9 | ✓ Phase 9 |
+| 44 | Scoped API keys, stored hashed | ✓ Phase 9 | ✓ Phase 9 |
+| 45 | Signed outbound webhooks | ✓ Phase 9 | ✓ Phase 9 |
 | 46 | Fifty synthetic golden messages with expected decisions | ✓ Phase 5 | ✓ Phase 5 |
 | 47 | Contract tests for the three schemas | ✓ Phase 5 | ✓ Phase 5 |
 | 48 | Shadow mode that stores a draft and does not send | ✓ Phase 6 | ✓ Phase 6 |

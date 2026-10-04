@@ -66,6 +66,14 @@ try:
 except Exception:
     pass
 
+# Register commercial ORM models (usage_events, api_keys, webhook_subscriptions) on Base.
+try:
+    import app.domain.usage     # noqa: F401
+    import app.domain.apikeys   # noqa: F401
+    import app.domain.webhooks  # noqa: F401
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).
