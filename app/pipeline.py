@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.amin import triage, TriageError
 from app.agents.amilos import draft_reply, ReplyError
+from app.agents.local_model import is_local_model_enabled
 from app.agents.thread_context import fetch_thread_context
 from app.ingest.ingest import ingest_message, RESULT_NEW, RESULT_DUPLICATE, RESULT_QUARANTINE
 from app.ingest.models import Message
@@ -126,6 +127,7 @@ def run_pipeline(
     draft_model: Optional[Any] = None,
     triage_model_name: str = "fake",
     draft_model_name: str = "fake",
+    local_model: Optional[Any] = None,
 ) -> PipelineResult:
     """
     Run the full pipeline for *msg*.
@@ -140,13 +142,21 @@ def run_pipeline(
         Tenant rule pack dict.  Pass None when the tenant has no rules.
     policy_config:
         Tenant policy config dict (shadow_mode, auto_reply_enabled, etc.).
+        When ``local_model: true`` is present the cloud triage_model is not
+        called; ``local_model`` is used instead.
     triage_model:
-        Model client for Amin.  Must implement ``.call(prompt) -> dict``.
+        Model client for Amin when the tenant is NOT on the local-model route.
+        Must implement ``.call(prompt) -> dict``.
         May be None if a rule is expected to fire for every message.
     draft_model:
         Model client for Amilos.  None = template-only path (no model call).
     triage_model_name / draft_model_name:
         Identifiers used for cost accounting (e.g. "gpt-4.1-mini").
+    local_model:
+        Model client used when ``policy_config`` has ``local_model: true``.
+        Must implement ``.call(prompt) -> dict``.  In tests this is always a
+        FakeLocalModel; production operators supply their own implementation.
+        No vendor key for this client is stored in this repository.
     """
     # ---- 1. Ingest ----
     message, ingest_result = ingest_message(db, msg)
@@ -199,6 +209,14 @@ def run_pipeline(
                     note=f"plan refusal: {refusal.reason}",
                 )
 
+    # ---- Phase 3: local model route ----
+    # When the tenant flag is set, the cloud triage_model is not called.
+    # The local_model parameter is used instead.  In tests this is always a
+    # FakeLocalModel; no vendor key is stored in this repository.
+    effective_triage_model = triage_model
+    if is_local_model_enabled(policy_config):
+        effective_triage_model = local_model
+
     # ---- 2. Triage (Amin) ----
     # Phase 2: fetch a redacted, capped clip of the last three messages in
     # the same thread.  Attachment bytes are never included.  The clip is
@@ -211,7 +229,7 @@ def run_pipeline(
         exclude_provider_message_id=msg.provider_message_id,
     )
 
-    tracked_triage = _TrackingModel(triage_model, triage_model_name) if triage_model else None
+    tracked_triage = _TrackingModel(effective_triage_model, triage_model_name) if effective_triage_model else None
 
     try:
         triage_decision = triage(
