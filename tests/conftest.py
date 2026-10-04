@@ -86,6 +86,11 @@ try:
 except Exception:
     pass
 
+# Register commercial Phase 1 ORM models (tenant_subscriptions).
+try:
+    import app.domain.subscription  # noqa: F401
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------

@@ -1,81 +1,39 @@
-Buro Assistant — Follow-up contract
+Buro Assistant — Commercial contract
 Development restart of this contract: 2026-10-04
 Owner: Amin Azimi, AI Architect, Azimi Innovation Lab
 Repository: aminbita162-glitch/buro-assistant, branch main only
-License already in the repo stays. Do not replace it. Do not add secrets, keys, mailbox passwords, or private links.
+License already in the repo stays. Do not add secrets, keys, card numbers, or private links.
 
-This file replaces the first build contract. Phases 1–10 of that contract are closed on main. Do not redo them. Do not create a branch. Do not open a pull request. Commit on main. The operator pushes.
+This file replaces the follow-up contract. Phases 1-10 of that contract are closed on main. Do not redo them. Do not create a branch.
 
-Product names stay: Amin splits and controls, Amilos drafts from an approved template, Leila supervises exceptions. Do not rename them. Do not name the coding tool anywhere in the repo.
+Product names stay: Amin splits and controls, Amilos drafts from an approved template, Leila supervises exceptions. Rules before model. Send stays off unless the tenant policy allows it.
 
-Stop rule: each phase ends when its report is written and tests pass. Then stop. Do not start the next phase. A long chat is forbidden. The operator opens a new task for the next phase. After Phase 10 of this contract, stop completely. Do not invent Phase 11.
+Stop rule: each phase ends when its report is written and tests pass. Then stop. Do not start the next phase.
 
-Honesty rule: designed-for is not verified. A failed test is written as failed in docs/TEST_HOUSE.md. No unmeasured throughput number. No claim that a factory can install this until the external test in Phase 10 is actually run. Commercial sale, billing, and a hosted service are out of scope. Everything else required below must be finished.
+Honesty rule: designed-for is not verified. The external script docs/EXTERNAL_TEST.sh has not been run by a second account. Do not mark it run. A failed test is written as failed in docs/TEST_HOUSE.md.
 
-What 1.0.0 already has, and must not be claimed as new: tenant isolation, ingest with idempotency, three agents, policy and shadow send, read-only desk, worker queue, quota, dead letter, hashed API keys, signed webhook builder, install note, runbook. Known gaps this contract closes: no live mailbox poll, no live webhook delivery, department filter is only a subject keyword, README is not the release surface, no German-market privacy pack, no external test record, no release tag.
+Commercial decision locked for this contract:
+- No permanent free plan.
+- Every new tenant gets a 10-day trial, then must choose a paid plan.
+- Trial has a token cap and cannot send mail.
+- Plan 1, Desk: 65 EUR per month, band 50-80. Shared desk, no model, no three agents.
+- Plan 2, Mail: 149 EUR per month, band 80-200. Desk plus mailbox intake. Model stays off.
+- Plan 3, Agents: 270 EUR per month, band 200-320. Amin, Amilos, and Leila, with a monthly token cap.
+- Prices are list prices inside the locked bands. They are not a measured market study.
+- Apple Developer membership is not a payment rail for this product. Do not mention it in product files.
+- No card data is stored. A gateway secret is read from the environment only. If the secret is absent, the fake gateway is used and the app still runs.
 
-Phase 1 — Wire the pipeline
-Connect ingest to Amin, then Amilos or Leila, then shadow or approval. A rule hit must not call a model. Record tokens and cost only when a model is called. Keep send off unless the tenant policy allows. Tests for the chain. App stays runnable. Stop.
+Phase 1 — Plan and trial state
+Add a tenant subscription record: plan code, status, trial end, token cap, token used. New tenant starts on trial. After 10 days, status becomes expired and agent routes refuse work. Tests for the four states. App stays runnable.
 
-Phase 2 — Live intake and delivery
-A worker loop polls the configured IMAP adapter, or the fake adapter when no mailbox env is set. Failed jobs go to the dead letter. Signed webhook payloads are delivered with retries and a delivery log. Secrets stay in the environment. Tests with the fake adapter. Stop.
+Phase 2 — Gateway boundary
+Add a payment port with two adapters: fake when no gateway secret is set, live only when the secret is in the environment. The live adapter must not log the secret. No Stripe key, no card number, and no private URL in the repo. Tests use the fake adapter only.
 
-Phase 3 — Operator desk that a buyer can use
-The existing index page becomes the desk: inbound, decision, draft, approval, audit, quota, cost. No innerHTML for message fields. Department is a stored field, not only a subject keyword. Approve and reject call the existing queue. Tenant scoped. Stop.
+Phase 3 — Enforce the three plans
+Desk plan cannot call Amin, Amilos, or Leila. Mail plan cannot call a model. Agents plan can call them only under the token cap. A rule hit still costs zero tokens. Send stays off on trial. Tests for each refusal.
 
-Phase 4 — German-market privacy pack
-Data map, retention enforcement, export, and delete for one tenant. Redaction before any model call stays. Logs must not print secrets or raw mailbox passwords. Document region choice as operator-controlled, not as a hosted EU claim. Threat-model update. Stop.
+Phase 4 — Operator surface
+The desk shows plan, trial days left, and token cap. It has no card field. Expired trial shows a choose-plan state and does not lock the whole app. README states sale wiring is in progress and hosting is not offered.
 
-Phase 5 — Lowest token policy
-Rule before model. Attachment bytes never go to a model. Prompt is the redacted subject, a short body clip, and the rule pack hash. Cache identical inputs. Dashboard shows tokens and cost per tenant. Tests prove a rule hit has zero model tokens. Stop.
-
-Phase 6 — Cinematic README and release surface
-Rewrite README.md: author Amin Azimi, Azimi Innovation Lab, internal links only, external-links section, roadmap, designed-versus-verified table, architecture diagram in text, quick start, and what is not claimed. Add docs/diagrams. No private links. Stop.
-
-Phase 7 — Company capabilities
-Add the fifteen buyer options in section B as working features with tests, not as README-only text. Each option states designed-for until its test is green. Stop.
-
-Phase 8 — Differentiation pack
-Add the fifteen product-finish items in section C. Comparison notes in docs/COMPARISON.md must cite real public products and must not invent benchmarks. Stop.
-
-Phase 9 — Test house and release
-docs/TEST_HOUSE.md records every run: date, actor, action, result, including failures. Release notes 1.1.0 list closed gaps and remaining commercial work. Tag is not created unless the operator asks. Stop.
-
-Phase 10 — External proof and freeze
-Write the external-test script a second account can run: install, seed, send a fake message, see a draft, fail a cross-tenant read. Record the result. If it was not run, write "not run". Freeze the roadmap. Stop. Do not start another phase.
-
-Section B — fifteen buyer options
-1. Shared team inbox with assignment.
-2. Internal note that is never sent.
-3. Collision lock when two operators open one draft.
-4. Snooze until a business hour.
-5. VIP sender list per tenant.
-6. After-hours holding queue.
-7. Saved reply snippets, still template-checked.
-8. Per-department SLA.
-9. CSV export of the audit log.
-10. Bounce and failure reason on the desk.
-11. Vacation responder that cannot invent facts.
-12. Legal hold that blocks retention delete.
-13. Role split: admin, operator, auditor.
-14. German and English receipt templates.
-15. Daily operator digest, shadow by default.
-
-Section C — fifteen finish items
-1. README opening a buyer can scan in one minute.
-2. Text architecture diagram.
-3. Designed-versus-verified table.
-4. External-links section.
-5. File map with one responsibility per package.
-6. Release timeline in docs/releases.
-7. Comparison page against public desks.
-8. Empty states and error copy on the desk.
-9. Keyboard path for approve and reject.
-10. Consistent names Amin, Amilos, Leila.
-11. Test-house index.
-12. Install video script, not a video file.
-13. Threat model linked from README.
-14. No secret in any sample.
-15. Final wording that sale and hosting are not done.
-
-Commit each phase on main with a one-line message. The report goes in docs/releases/follow-up-phase-N.md. If a test fails, stop and write the failure. Do not hide it.
+Phase 5 — Record and freeze
+Write docs/releases/commercial-phase-5.md. Record the run in docs/TEST_HOUSE.md. State that the second-account script is still not run. Stop. Do not start a phase 6.
