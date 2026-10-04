@@ -4,8 +4,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-1.0.0-3b82f6?style=flat-square" alt="version"/>
-  <img src="https://img.shields.io/badge/phase-8%20closed-22c55e?style=flat-square" alt="phase 8 closed"/>
-  <img src="https://img.shields.io/badge/tests-504%20passing-22c55e?style=flat-square" alt="tests"/>
+  <img src="https://img.shields.io/badge/phase-9%20closed-22c55e?style=flat-square" alt="phase 9 closed"/>
+  <img src="https://img.shields.io/badge/tests-856%20passing-22c55e?style=flat-square" alt="tests"/>
   <img src="https://img.shields.io/badge/self--hosted-operator--controlled-7c5cd8?style=flat-square" alt="self-hosted"/>
   <img src="https://img.shields.io/badge/send-off%20by%20default-f59e0b?style=flat-square" alt="send off by default"/>
   <img src="https://img.shields.io/badge/license-see%20LICENSE-57606a?style=flat-square" alt="license"/>
@@ -18,7 +18,7 @@
 # Buro Assistant
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Current version:** 1.0.0 (Phase 8 closed)
+**Current version:** 1.0.0 (Phase 9 closed)
 **License:** see `LICENSE`
 
 ---
@@ -344,7 +344,7 @@ service and does not enforce or verify data residency automatically. See
 python3 -m pytest tests/ -v
 ```
 
-504 tests, 0 failures (follow-up Phase 7 baseline).
+856 tests, 0 failures (Phase 8 baseline — Phase 9 adds no new tests).
 
 | File | Covers |
 |---|---|

@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Phase 7 (Air-gap package)
+**Last updated:** Phase 9 (Record and freeze)
 
 ---
 
@@ -49,6 +49,8 @@ run.
 | 21 | 2026-10-21 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 5 — audit hash chain) | 797 passed, 0 failed | Audit hash chain — 18 new tests |
 | 22 | 2026-10-22 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 6 — desk signals) | 842 passed, 0 failed | Desk signals — 45 new tests |
 | 23 | 2026-10-23 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 7 — air-gap package) | 856 passed, 0 failed | Air-gap package — 14 new tests |
+| 24 | 2026-10-24 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 8 — visual README) | 856 passed, 0 failed | Visual README — no new tests added this phase |
+| 25 | 2026-10-25 | Amin Azimi | `python3 -m pytest tests/ -q` (Phase 9 — record and freeze) | 856 passed, 0 failed | Record and freeze — no new tests added this phase |
 
 ---
 
