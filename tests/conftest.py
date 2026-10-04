@@ -49,6 +49,14 @@ try:
 except Exception:
     pass
 
+# Register policy ORM models (approval_queue, audit_log, drafts) on Base.
+try:
+    import app.policy.approval  # noqa: F401
+    import app.policy.audit     # noqa: F401
+    import app.policy.shadow    # noqa: F401
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).

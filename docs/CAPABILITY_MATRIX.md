@@ -23,13 +23,13 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 13 | Redaction before any model call | ✓ Phase 5 | ✓ Phase 5 |
 | 14 | Prompt and schema version stored on each decision | ✓ Phase 5 | ✓ Phase 5 |
 | 15 | Schema validation of agent output | ✓ Phase 5 | ✓ Phase 5 |
-| 16 | Template registry with variables and forbidden phrases | Phase 6 | — |
-| 17 | Auto-reply off unless tenant turns it on | Phase 6 | — |
-| 18 | Receipt template stating message was received and will be reviewed | Phase 6 | — |
-| 19 | Business-hours calendar per tenant | Phase 6 | — |
-| 20 | SLA clock from ingest time | Phase 6 | — |
-| 21 | Human approval queue | Phase 6 | — |
-| 22 | Append-only audit log | Phase 6 | — |
+| 16 | Template registry with variables and forbidden phrases | ✓ Phase 6 | ✓ Phase 6 |
+| 17 | Auto-reply off unless tenant turns it on | ✓ Phase 6 | ✓ Phase 6 |
+| 18 | Receipt template stating message was received and will be reviewed | ✓ Phase 6 | ✓ Phase 6 |
+| 19 | Business-hours calendar per tenant | ✓ Phase 6 | ✓ Phase 6 |
+| 20 | SLA clock from ingest time | ✓ Phase 6 | ✓ Phase 6 |
+| 21 | Human approval queue | ✓ Phase 6 | ✓ Phase 6 |
+| 22 | Append-only audit log | ✓ Phase 6 | ✓ Phase 6 |
 | 23 | Dashboard counts: received, classified, drafted, sent, held, failed | Phase 7 | — |
 | 24 | Department queues | Phase 7 | — |
 | 25 | Cost and token fields on model calls | Phase 8 | — |
@@ -55,7 +55,7 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 45 | Signed outbound webhooks | Phase 9 | — |
 | 46 | Fifty synthetic golden messages with expected decisions | ✓ Phase 5 | ✓ Phase 5 |
 | 47 | Contract tests for the three schemas | ✓ Phase 5 | ✓ Phase 5 |
-| 48 | Shadow mode that stores a draft and does not send | Phase 6 | — |
+| 48 | Shadow mode that stores a draft and does not send | ✓ Phase 6 | ✓ Phase 6 |
 | 49 | Runbook for incident, quota breach, and bad template | Phase 10 | — |
 | 50 | Install, backup, restore, threat model, and release notes | Phase 10 | — |
 

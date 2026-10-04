@@ -1,1 +1,1 @@
-# app/policy – stub added in Phase 1; implementation in later phases
+"""app/policy – templates, send decision, SLA, calendar, approval queue, audit log, shadow mode."""
