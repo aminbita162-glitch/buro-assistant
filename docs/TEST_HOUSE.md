@@ -1,7 +1,7 @@
 # Buro Assistant — Test House
 
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
-**Last updated:** Commercial Phase 2
+**Last updated:** Commercial Phase 3
 
 ---
 
@@ -39,6 +39,7 @@ run.
 | 11 | 2026-10-11 | Amin Azimi | `python3 -m pytest tests/ -q` (Follow-up Phase 10) | 600 passed, 0 failed | External test script written; roadmap frozen — no new tests added this phase |
 | 12 | 2026-10-12 | Amin Azimi | `python3 -m pytest tests/ -q` (Commercial Phase 1) | 620 passed, 0 failed | Tenant subscription record — 20 new tests |
 | 13 | 2026-10-13 | Amin Azimi | `python3 -m pytest tests/ -q` (Commercial Phase 2) | 635 passed, 0 failed | Gateway boundary — 15 new tests |
+| 14 | 2026-10-14 | Amin Azimi | `python3 -m pytest tests/ -q` (Commercial Phase 3) | 670 passed, 0 failed | Plan capability enforcement — 35 new tests |
 
 ---
 
@@ -84,6 +85,7 @@ recorded here.
 | `docs/EXTERNAL_TEST.sh` | External install-and-verify script (not a test file; run manually) | Follow-up 10 |
 | `tests/test_subscription.py` | Tenant subscription states: trial, active, expired, cancelled | Commercial Phase 1 |
 | `tests/test_gateway.py` | Payment port: fake adapter, live adapter (secret absent), factory selection | Commercial Phase 2 |
+| `tests/test_plan_rules.py` | Plan capability enforcement: desk/mail/agents/trial refusals, token cap, send block | Commercial Phase 3 |
 
 ---
 
