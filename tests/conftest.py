@@ -15,6 +15,8 @@ from sqlalchemy.pool import StaticPool
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:3000")
+# Ensure the gateway secret is absent so all tests use the fake adapter.
+os.environ.pop("GATEWAY_SECRET", None)
 
 # ---------------------------------------------------------------------------
 # Patch create_engine BEFORE the app module is imported so the engine it
