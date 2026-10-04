@@ -32,6 +32,7 @@ from app.policy.send_decision import should_send, SEND_DECISION_ALLOW
 from app.policy.shadow import store_draft
 from app.policy.templates import DEFAULT_REGISTRY, RECEIPT_TEMPLATE_ID, build_receipt_variables
 from app.workers.cost import CostRecord, null_cost
+from app.domain.usage import emit as emit_usage
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +208,10 @@ def run_pipeline(
             triage_cost.tokens_out + draft_cost.tokens_out,
         )
 
-        # ---- 4. Send decision ----
+        # ---- 4. Emit usage event when a model was called (Phase 5 dashboard). ----
+        _emit_cost_event(db, msg.tenant_id, total_cost, reference_id=message.id)
+
+        # ---- 5. Send decision ----
         send_dec = should_send(policy_config)
         if send_dec == SEND_DECISION_ALLOW:
             # Caller handles actual delivery; we record state as "send".
@@ -246,6 +250,9 @@ def run_pipeline(
 
     else:
         # Action is hold / request_human / reject / reroute / escalate.
+        # Emit usage for triage model cost (may be zero on rule-hit path).
+        _emit_cost_event(db, msg.tenant_id, triage_cost, reference_id=message.id)
+
         # Enqueue for human review when the action is not "reject".
         if action != "reject":
             entry = enqueue_approval(
@@ -274,3 +281,31 @@ def run_pipeline(
                 cost=triage_cost,
                 note=f"action={action}; no draft produced",
             )
+
+
+# ---------------------------------------------------------------------------
+# Internal helper — emit a usage event row for one pipeline run.
+# Only emits when tokens > 0 to keep the events table clean.
+# ---------------------------------------------------------------------------
+
+def _emit_cost_event(
+    db: Session,
+    tenant_id: int,
+    cost: CostRecord,
+    reference_id: Optional[int] = None,
+) -> None:
+    """Write a usage_event row for this pipeline run (best-effort; never raises)."""
+    try:
+        total_tokens = cost.tokens_in + cost.tokens_out
+        emit_usage(
+            db,
+            tenant_id=tenant_id,
+            event_type="model_called",
+            quantity=total_tokens,
+            unit="tokens",
+            cost_usd=cost.cost_usd if cost.cost_usd else None,
+            actor="system",
+            reference_id=reference_id,
+        )
+    except Exception:  # noqa: BLE001
+        pass  # usage event failure must not break the pipeline

@@ -469,9 +469,13 @@ def desk_cost(
 
     Aggregates total tokens and total cost_usd across all usage_events rows,
     and returns the most recent *limit* individual events.
+
+    Phase 5: also includes quota row for today so the dashboard can show
+    daily tokens used vs. remaining in one call.
     """
     from app.main import safe_db_error_message
     from app.domain.usage import events_for_tenant
+    from app.workers.quota import get_or_create_quota, DEFAULT_DAILY_TOKEN_QUOTA
 
     db, user = _open_db_and_auth(authorization)
     try:
@@ -482,11 +486,20 @@ def desk_cost(
         total_cost = sum(
             e.cost_usd for e in events if e.cost_usd is not None
         )
+        # Phase 5: include today's quota row for dashboard token/cost display.
+        quota_row = get_or_create_quota(db, user.tenant_id)
         return {
             "tenant_id": user.tenant_id,
             "total_tokens": total_tokens,
             "total_cost_usd": round(total_cost, 6),
             "event_count": len(events),
+            # Today's live counters (from quota table, updated per-pipeline-run).
+            "today_tokens_used": quota_row.tokens_used,
+            "today_cost_usd": round(quota_row.cost_usd_used, 6),
+            "daily_token_quota": DEFAULT_DAILY_TOKEN_QUOTA,
+            "today_tokens_remaining": max(
+                0, DEFAULT_DAILY_TOKEN_QUOTA - quota_row.tokens_used
+            ),
             "events": [
                 {
                     "id": e.id,

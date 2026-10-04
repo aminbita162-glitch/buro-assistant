@@ -23,11 +23,30 @@ Rule pack schema
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any, Dict, List, Optional
 
 
 CONFIDENCE_THRESHOLD_DEFAULT = 0.7
+
+
+def rule_pack_hash(rule_pack: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Return a short (16-char hex) hash of the stable rule pack fields.
+
+    Only domain_rules, subject_rules, and department_rules are included.
+    This hash is embedded in every model prompt so that a change in rules
+    is visible in the prompt history without leaking rule content.
+    """
+    stable: Dict[str, Any] = {}
+    if rule_pack:
+        for key in ("domain_rules", "subject_rules", "department_rules"):
+            if key in rule_pack:
+                stable[key] = rule_pack[key]
+    serialized = json.dumps(stable, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
 
 class RuleHit:

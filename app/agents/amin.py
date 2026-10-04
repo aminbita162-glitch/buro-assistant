@@ -19,6 +19,7 @@ The same inputs with the model disabled always produce the same decision hash.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 from typing import Any, Dict, Optional
@@ -30,13 +31,28 @@ from app.agents.rules import (
     evaluate_rules,
     get_confidence_threshold,
     get_urgency_overrides,
+    rule_pack_hash,
 )
 from app.agents.urgency import classify_urgency
 from app.ingest.normalize import NormalizedMessage
 
 SCHEMA_VERSION = "1"
-PROMPT_VERSION = "amin-v1"
+PROMPT_VERSION = "amin-v2"   # incremented: prompt structure changed in Phase 5
 CONFIDENCE_FLOOR = 0.0   # accept any model result ≥ 0
+
+# ---------------------------------------------------------------------------
+# Prompt body clip length — attachment bytes never go to a model (Phase 5).
+# Only the first BODY_CLIP_CHARS characters of the redacted body are included.
+# ---------------------------------------------------------------------------
+BODY_CLIP_CHARS = 200
+
+# ---------------------------------------------------------------------------
+# In-process LRU cache for identical (redacted_subject, body_clip, pack_hash).
+# Rule-hit results are deterministic; caching them avoids repeat work.
+# Cache size is bounded to prevent unbounded memory growth.
+# ---------------------------------------------------------------------------
+_TRIAGE_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_CACHE_MAX = 512
 
 # ---------------------------------------------------------------------------
 # Schema validation helper (row 15)
@@ -104,21 +120,27 @@ def triage(
         If ``None`` and no rule fires, raises :class:`TriageError`.
     """
     # 1. Redact PII before any model call (row 13).
+    #    Attachment content is never passed here — only subject and body_text.
+    #    Attachment bytes must not reach the model (Phase 5).
     redacted_subject, redacted_body, _ = redact_message(
         msg.subject, msg.body_text
     )
 
-    # 2. Language detection (row 10).
+    # 2. Short body clip — only the first BODY_CLIP_CHARS chars go to the model.
+    body_clip = redacted_body[:BODY_CLIP_CHARS]
+
+    # 3. Language detection (row 10).
     language = detect_language(redacted_body or redacted_subject)
 
-    # 3. Urgency scoring with tenant overrides (row 11).
+    # 4. Urgency scoring with tenant overrides (row 11).
     urgency_overrides = get_urgency_overrides(rule_pack)
     urgency = classify_urgency(
         redacted_subject + " " + redacted_body, urgency_overrides
     )
 
-    # 4. Rule evaluation (row 7).
+    # 5. Rule evaluation (row 7).  Rule before model.
     sender_domain = msg.sender.split("@")[-1] if "@" in msg.sender else msg.sender
+    pack_hash = rule_pack_hash(rule_pack)
     rule_hit = evaluate_rules(
         sender_domain=sender_domain,
         subject=msg.subject_normalized,
@@ -130,17 +152,22 @@ def triage(
 
     if rule_hit:
         # Rule fires → no model call; deterministic result.
+        # Check cache first to avoid redundant work on identical inputs.
+        cache_key = (redacted_subject, body_clip, pack_hash, rule_hit.rule_name)
+        if cache_key in _TRIAGE_CACHE:
+            return _TRIAGE_CACHE[cache_key]
+
         department = rule_hit.department
         action = rule_hit.action
         confidence = 1.0
         rule_hit_name: Optional[str] = rule_hit.rule_name
     else:
-        # 5. Model call (row 8).
+        # 6. Model call (row 8).
         if model is None:
             raise TriageError(
                 "No rule fired and no model provided — cannot produce a decision."
             )
-        prompt = _build_prompt(redacted_subject, redacted_body, language, urgency)
+        prompt = _build_prompt(redacted_subject, body_clip, language, urgency, pack_hash)
         model_output = model.call(prompt)
 
         department = model_output.get("department", "general")
@@ -179,16 +206,32 @@ def triage(
         "decision_hash": decision_hash,
     }
     _validate(decision)
+
+    # Store rule-hit results in the cache.
+    if rule_hit_name is not None:
+        if len(_TRIAGE_CACHE) >= _CACHE_MAX:
+            # Evict the oldest entry (insertion-ordered dict, Python 3.7+).
+            _TRIAGE_CACHE.pop(next(iter(_TRIAGE_CACHE)))
+        cache_key = (redacted_subject, body_clip, pack_hash, rule_hit_name)
+        _TRIAGE_CACHE[cache_key] = decision
+
     return decision
 
 
 def _build_prompt(
-    subject: str, body: str, language: str, urgency: str
+    subject: str, body_clip: str, language: str, urgency: str, pack_hash: str
 ) -> str:
+    """
+    Build the model prompt.
+
+    Only the redacted subject, a short body clip (≤ BODY_CLIP_CHARS chars),
+    and the rule pack hash are sent.  Attachment bytes are never included.
+    """
     return (
-        f"Language: {language}\n"
-        f"Urgency: {urgency}\n"
-        f"Subject: {subject}\n"
-        f"Body: {body}\n"
+        f"rules_hash: {pack_hash}\n"
+        f"language: {language}\n"
+        f"urgency: {urgency}\n"
+        f"subject: {subject}\n"
+        f"body: {body_clip}\n"
         "Return JSON: {\"department\": \"...\", \"action\": \"draft_reply|hold|forward|reject|escalate\", \"confidence\": 0.0-1.0}"
     )
