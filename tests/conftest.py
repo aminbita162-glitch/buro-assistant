@@ -74,6 +74,14 @@ try:
 except Exception:
     pass
 
+# Register Phase 2 ORM models (delivery_log) on Base.
+try:
+    import app.workers.webhook_delivery  # noqa: F401
+except Exception:
+    pass
+
+
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).
