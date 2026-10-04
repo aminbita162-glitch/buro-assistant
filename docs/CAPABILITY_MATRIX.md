@@ -32,12 +32,12 @@ This matrix lists every capability defined in the release checklist. The **Desig
 | 22 | Append-only audit log | ✓ Phase 6 | ✓ Phase 6 |
 | 23 | Dashboard counts: received, classified, drafted, sent, held, failed | ✓ Phase 7 | ✓ Phase 7 |
 | 24 | Department queues | ✓ Phase 7 | ✓ Phase 7 |
-| 25 | Cost and token fields on model calls | Phase 8 | — |
-| 26 | Per-tenant daily quota | Phase 8 | — |
-| 27 | Backpressure when queue depth exceeds tenant cap | Phase 8 | — |
-| 28 | Dead-letter queue and replay | Phase 8 | — |
-| 29 | Priority lanes | Phase 8 | — |
-| 30 | Traces around ingest, decide, draft, and send | Phase 8 | — |
+| 25 | Cost and token fields on model calls | ✓ Phase 8 | ✓ Phase 8 |
+| 26 | Per-tenant daily quota | ✓ Phase 8 | ✓ Phase 8 |
+| 27 | Backpressure when queue depth exceeds tenant cap | ✓ Phase 8 | ✓ Phase 8 |
+| 28 | Dead-letter queue and replay | ✓ Phase 8 | ✓ Phase 8 |
+| 29 | Priority lanes | ✓ Phase 8 | ✓ Phase 8 |
+| 30 | Traces around ingest, decide, draft, and send | ✓ Phase 8 | ✓ Phase 8 |
 | 31 | Live and ready health checks; ready checks the database | ✓ Phase 2 | ✓ Phase 2 |
 | 32 | Alembic migrations; no schema change on import | ✓ Phase 3 | ✓ Phase 3 |
 | 33 | Argon2id password hashes with one-time legacy SHA-256 verification | ✓ Phase 2 | ✓ Phase 2 |

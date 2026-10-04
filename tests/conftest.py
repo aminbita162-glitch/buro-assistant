@@ -57,6 +57,15 @@ try:
 except Exception:
     pass
 
+# Register worker ORM models (traces, work_queue, dead_letter, quotas) on Base.
+try:
+    import app.workers.trace   # noqa: F401
+    import app.workers.quota   # noqa: F401
+    import app.workers.queue   # noqa: F401
+    import app.workers.dlq     # noqa: F401
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Also patch alembic's engine_from_config so migration tests work the
 # same way (StaticPool, no pool_timeout).

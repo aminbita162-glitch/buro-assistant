@@ -1,1 +1,1 @@
-# app/workers – stub added in Phase 1; implementation in later phases
+"""app/workers – queue, lanes, quota, backpressure, dead letter, traces, cost fields."""
