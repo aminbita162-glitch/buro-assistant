@@ -1,173 +1,81 @@
-# Buro Assistant
-# Execution directive
-# Owner: Amin Azimi, AI Architect, Azimi Innovation Lab
-# Development restart: 2026-10-03
-# Release target: 1.0.0
-# This file is the build contract. It is not a diary and not a lock.
+Buro Assistant — Follow-up contract
+Development restart of this contract: 2026-10-04
+Owner: Amin Azimi, AI Architect, Azimi Innovation Lab
+Repository: aminbita162-glitch/buro-assistant, branch main only
+License already in the repo stays. Do not replace it. Do not add secrets, keys, mailbox passwords, or private links.
 
-## 1. Outcome
+This file replaces the first build contract. Phases 1–10 of that contract are closed on main. Do not redo them. Do not create a branch. Do not open a pull request. Commit on main. The operator pushes.
 
-When every section here is implemented and its tests pass, release 1.0.0 is complete. The product an operator can install is:
+Product names stay: Amin splits and controls, Amilos drafts from an approved template, Leila supervises exceptions. Do not rename them. Do not name the coding tool anywhere in the repo.
 
-A multi-tenant office mail desk. It receives messages through a configured mailbox adapter, stores them once, classifies them with fixed rules before any model call, drafts a short receipt from an approved template, sends that receipt only when the tenant policy allows, and shows the operator the inbound queue, decisions, drafts, sent mail, failures, cost, and audit trail. Tasks extracted from a message stay attached to that message and that tenant.
+Stop rule: each phase ends when its report is written and tests pass. Then stop. Do not start the next phase. A long chat is forbidden. The operator opens a new task for the next phase. After Phase 10 of this contract, stop completely. Do not invent Phase 11.
 
-The system must boot and serve the operator UI at the end of every phase. A missing later phase must never disable login, health, or already-built routes. There is no startup lock, no license server, no phase gate inside the running product, and no feature that refuses to operate because a later checklist row is open.
+Honesty rule: designed-for is not verified. A failed test is written as failed in docs/TEST_HOUSE.md. No unmeasured throughput number. No claim that a factory can install this until the external test in Phase 10 is actually run. Commercial sale, billing, and a hosted service are out of scope. Everything else required below must be finished.
 
-Scale wording is fixed. The release is built for many tenants and horizontal workers. Verified numbers are only those written by the benchmark in this repository. Do not print an unmeasured throughput claim.
+What 1.0.0 already has, and must not be claimed as new: tenant isolation, ingest with idempotency, three agents, policy and shadow send, read-only desk, worker queue, quota, dead letter, hashed API keys, signed webhook builder, install note, runbook. Known gaps this contract closes: no live mailbox poll, no live webhook delivery, department filter is only a subject keyword, README is not the release surface, no German-market privacy pack, no external test record, no release tag.
 
-## 2. Rules for the implementing agent
+Phase 1 — Wire the pipeline
+Connect ingest to Amin, then Amilos or Leila, then shadow or approval. A rule hit must not call a model. Record tokens and cost only when a model is called. Keep send off unless the tenant policy allows. Tests for the chain. App stays runnable. Stop.
 
-Execute only the phase named in the operator instruction. At the end of that phase, commit, push the phase branch, run the tests named in the phase, fix failures, write docs/releases/phase-N.md, and stop. Do not begin the next phase until a new instruction names it.
+Phase 2 — Live intake and delivery
+A worker loop polls the configured IMAP adapter, or the fake adapter when no mailbox env is set. Failed jobs go to the dead letter. Signed webhook payloads are delivered with retries and a delivery log. Secrets stay in the environment. Tests with the fake adapter. Stop.
 
-Do not add a fourth agent. Do not rename the three agents. Do not replace the license with an open-source grant. Do not commit secrets, tokens, mailbox passwords, or private URLs. Do not put conversation notes into repository files. Do not name an external assistant product in repository files.
+Phase 3 — Operator desk that a buyer can use
+The existing index page becomes the desk: inbound, decision, draft, approval, audit, quota, cost. No innerHTML for message fields. Department is a stored field, not only a subject keyword. Approve and reject call the existing queue. Tenant scoped. Stop.
 
-Preserve, until a tested replacement exists: a user sees only their tenant's records; completed tasks leave the active list; explicit list and completion commands still work; database errors are not returned as raw SQL.
+Phase 4 — German-market privacy pack
+Data map, retention enforcement, export, and delete for one tenant. Redaction before any model call stays. Logs must not print secrets or raw mailbox passwords. Document region choice as operator-controlled, not as a hosted EU claim. Threat-model update. Stop.
 
-## 3. Repository layout to reach by release
+Phase 5 — Lowest token policy
+Rule before model. Attachment bytes never go to a model. Prompt is the redacted subject, a short body clip, and the rule pack hash. Cache identical inputs. Dashboard shows tokens and cost per tenant. Tests prove a rule hit has zero model tokens. Stop.
 
-app/api/ routes and dependencies
-app/domain/ tenants, users, sessions, messages, tasks
-app/ingest/ providers, normalization, idempotency
-app/agents/ triage.py, reply.py, supervisor.py
-app/policy/ rules, templates, send decision
-app/workers/ queue, lanes, dead letter
-app/web/ operator UI
-migrations/ Alembic only
-schemas/ JSON schemas for the three agent outputs
-tests/ unit, contract, tenant isolation, golden messages
-docs/ install, backup, threat model, runbook, capability matrix, releases
-LICENSE
-README.md
-.env.example
-run.sh
+Phase 6 — Cinematic README and release surface
+Rewrite README.md: author Amin Azimi, Azimi Innovation Lab, internal links only, external-links section, roadmap, designed-versus-verified table, architecture diagram in text, quick start, and what is not claimed. Add docs/diagrams. No private links. Stop.
 
-No business rule remains only in a single 1500-line module at release.
+Phase 7 — Company capabilities
+Add the fifteen buyer options in section B as working features with tests, not as README-only text. Each option states designed-for until its test is green. Stop.
 
-## 4. Three agents
+Phase 8 — Differentiation pack
+Add the fifteen product-finish items in section C. Comparison notes in docs/COMPARISON.md must cite real public products and must not invent benchmarks. Stop.
 
-Triage accepts a normalized message and the tenant rule pack. It returns JSON valid against schemas/triage_decision.json. It does not send mail and does not write billing.
+Phase 9 — Test house and release
+docs/TEST_HOUSE.md records every run: date, actor, action, result, including failures. Release notes 1.1.0 list closed gaps and remaining commercial work. Tag is not created unless the operator asks. Stop.
 
-Reply accepts the triage decision and an approved template. It returns JSON valid against schemas/reply_draft.json. It cannot invent a price, a legal promise, or a date that is not in the template variables.
+Phase 10 — External proof and freeze
+Write the external-test script a second account can run: install, seed, send a fake message, see a draft, fail a cross-tenant read. Record the result. If it was not run, write "not run". Freeze the roadmap. Stop. Do not start another phase.
 
-Supervisor accepts an exception. It returns JSON valid against schemas/supervisor_decision.json. Allowed values are hold, request_human, reject, reroute. It cannot send or delete.
+Section B — fifteen buyer options
+1. Shared team inbox with assignment.
+2. Internal note that is never sent.
+3. Collision lock when two operators open one draft.
+4. Snooze until a business hour.
+5. VIP sender list per tenant.
+6. After-hours holding queue.
+7. Saved reply snippets, still template-checked.
+8. Per-department SLA.
+9. CSV export of the audit log.
+10. Bounce and failure reason on the desk.
+11. Vacation responder that cannot invent facts.
+12. Legal hold that blocks retention delete.
+13. Role split: admin, operator, auditor.
+14. German and English receipt templates.
+15. Daily operator digest, shadow by default.
 
-If a rule hits, the model client is not called. Model output that fails schema validation becomes a supervisor exception and is not written as a decision. The same tenant rules and the same normalized message, with the model disabled, produce the same decision hash.
+Section C — fifteen finish items
+1. README opening a buyer can scan in one minute.
+2. Text architecture diagram.
+3. Designed-versus-verified table.
+4. External-links section.
+5. File map with one responsibility per package.
+6. Release timeline in docs/releases.
+7. Comparison page against public desks.
+8. Empty states and error copy on the desk.
+9. Keyboard path for approve and reject.
+10. Consistent names Amin, Amilos, Leila.
+11. Test-house index.
+12. Install video script, not a video file.
+13. Threat model linked from README.
+14. No secret in any sample.
+15. Final wording that sale and hosting are not done.
 
-## 5. Release checklist
-
-All fifty rows are required for 1.0.0.
-
-1. Tenant on every business table.
-2. Tests that reject cross-tenant reads.
-3. Idempotency key of provider message id plus tenant.
-4. Immutable stored raw message.
-5. IMAP adapter implemented, credentials only from the environment.
-6. Provider-neutral normalized message.
-7. Tenant rule pack for domain, subject, and department.
-8. Confidence threshold. Below threshold goes to Supervisor.
-9. Duplicate detection by Message-Id and normalized subject.
-10. Language detection by library first.
-11. Urgency lexicon with tenant overrides.
-12. Attachment allowlist and quarantine state.
-13. Redaction before any model call.
-14. Prompt and schema version stored on each decision.
-15. Schema validation of agent output.
-16. Template registry with variables and forbidden phrases.
-17. Auto-reply off unless the tenant turns it on.
-18. Receipt template that states the message was received and will be reviewed.
-19. Business-hours calendar per tenant.
-20. SLA clock from ingest time.
-21. Human approval queue.
-22. Append-only audit log.
-23. Dashboard counts for received, classified, drafted, sent, held, and failed.
-24. Department queues.
-25. Cost and token fields on model calls.
-26. Per-tenant daily quota.
-27. Backpressure when queue depth exceeds the tenant cap.
-28. Dead-letter queue and replay.
-29. Priority lanes.
-30. Traces around ingest, decide, draft, and send.
-31. Live and ready health checks. Ready checks the database.
-32. Alembic migrations. No schema change on import.
-33. Argon2id password hashes, with one-time verification of a legacy SHA-256 hash.
-34. Session table, hashed token, expiry, rotation on login.
-35. Rate limits on signup, login, and model routes.
-36. Security headers and a content security policy.
-37. CORS allowlist from the environment.
-38. Message and task fields rendered as text, not HTML.
-39. Capability matrix with Designed for and Verified columns.
-40. Usage events.
-41. Tenant data export job.
-42. Retention field, default 180 days.
-43. Sandbox tenant seed command.
-44. Scoped API keys, stored hashed.
-45. Signed outbound webhooks.
-46. Fifty synthetic golden messages with expected decisions.
-47. Contract tests for the three schemas.
-48. Shadow mode that stores a draft and does not send.
-49. Runbook for incident, quota breach, and bad template.
-50. Install, backup, restore, threat model, and release notes.
-
-## 6. Phases
-
-Development restart date for every release note: 2026-10-03.
-
-Phase 1. Governance and layout. Add LICENSE using section 7. Add README using section 8. Add docs/CAPABILITY_MATRIX.md, docs/releases/phase-1.md, .env.example, pinned dependencies, package layout, and run.sh. Move current behavior behind the new package without removing working routes. The app still starts.
-
-Phase 2. Security. Argon2id, sessions, rate limits, model routes blocked until authentication, text rendering, CORS from the environment, live and ready health. The app still starts.
-
-Phase 3. Tenancy and migrations. Alembic baseline, tenant_id, foreign keys, isolation tests, demo seed command. The app still starts.
-
-Phase 4. Ingest. Messages, idempotency, raw store, IMAP adapter, fake adapter for tests, attachment quarantine, duplicate detection. The app still starts.
-
-Phase 5. Agents. Three modules, three schemas, rule engine, redaction, golden set, decision hash, fake model in tests. The app still starts.
-
-Phase 6. Policy and receipt. Templates, forbidden phrases, approval queue, shadow mode, SLA, business hours, send only on allow. The app still starts. Default remains draft.
-
-Phase 7. Operator desk. Inbound, decisions, drafts, departments, audit, existing task list. The app still starts.
-
-Phase 8. Workers. Queue, lanes, quota, backpressure, dead letter, traces, cost fields, benchmark written to docs/BENCHMARK.md. The app still starts.
-
-Phase 9. Commercial controls. Usage events, hashed API keys, signed webhooks, export, retention, sandbox seed, matrix updated from tests. The app still starts.
-
-Phase 10. Release 1.0.0. Install, backup, restore, threat model, runbook, docs/releases/1.0.0.md with date, checklist of all fifty rows pointing to tests. Tag v1.0.0 only if the operator instruction says tag. The app starts with no paid key by using the fake adapter.
-
-Each phase report contains the date, the branch, the test command, the result, and the checklist rows closed.
-
-## 7. License to place in LICENSE
-
-Buro Assistant
-Copyright (c) 2026 Amin Azimi, AI Architect, Azimi Innovation Lab.
-All rights reserved.
-
-Amin Azimi owns the software, documentation, and derivatives in this repository. Amin Azimi may use, modify, sell, license, sublicense, gift, white-label, and commercialize them in any territory.
-
-No other person receives a production or redistribution right unless Amin Azimi grants it in a separate written license. Viewing this repository is not that grant.
-
-Dependencies remain under their own licenses and are listed in docs/THIRD_PARTY.md.
-
-## 8. README required shape
-
-Use internal anchors only. Do not add external links.
-
-Required order:
-- Title
-- Contents, linking to every section below
-- What it does
-- Agents
-- Architecture
-- Verified in this release
-- Designed for, not yet measured
-- Quick start
-- Configuration
-- Tests
-- Release
-- Author
-
-Author section, about fifty words, containing the project name, Amin Azimi, AI Architect, and Azimi Innovation Lab:
-
-Author. Buro Assistant is an office mail desk built by Amin Azimi, AI Architect, Azimi Innovation Lab. It receives tenant mail, classifies it, drafts a short receipt, and places the work on the right queue so an operator can see what arrived, what was decided, and what was sent.
-
-## 9. Operator instruction
-
-Execute Phase 1 only, from DIRECTIVE.txt. Keep the application runnable. Do not start Phase 2. Stop after the phase report.
+Commit each phase on main with a one-line message. The report goes in docs/releases/follow-up-phase-N.md. If a test fails, stop and write the failure. Do not hide it.
