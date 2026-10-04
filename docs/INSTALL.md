@@ -1,8 +1,8 @@
 # Buro Assistant — Install, Backup, Restore, and Threat Model
 
 **Product:** Buro Assistant
-**Version:** 1.0.0
-**Date:** 2026-10-03
+**Version:** 1.0.0 → follow-up Phase 4
+**Date:** 2026-10-06
 **Author:** Amin Azimi, AI Architect, Azimi Innovation Lab
 
 ---
@@ -35,6 +35,13 @@
    cp .env.example .env
    # Edit .env — set DATABASE_URL, OPENAI_API_KEY, ALLOWED_ORIGINS
    ```
+
+   **Database region (operator-controlled):** Set `DATABASE_URL` to point to
+   a database in the region you require.  Buro Assistant does not operate a
+   hosted service and does not enforce or verify data residency automatically.
+   If you must keep data in the EU (e.g. for GDPR compliance), host the
+   database in an EU region.  This is your responsibility as the operator.
+   See `docs/PRIVACY_DATA_MAP.md` for the full data map.
 
 4. **Run database migrations.**
    Migrations run automatically on first startup.  To run them manually:
@@ -130,6 +137,9 @@ pg_restore --list buro-backup-<date>.dump | head -20
 
 ## Threat model
 
+> The full STRIDE threat model is in [`docs/THREAT_MODEL.md`](THREAT_MODEL.md).
+> The section below is a summary retained for quick reference.
+
 ### Assets
 
 | Asset | Sensitivity |
@@ -167,6 +177,7 @@ pg_restore --list buro-backup-<date>.dump | head -20
 - Transport encryption (TLS termination is expected at the reverse proxy / load balancer layer).
 - Multi-region replication.
 - SOC 2 / ISO 27001 certification.
+- Commercial sale and hosted service — these are not done (see `docs/PRIVACY_DATA_MAP.md`).
 
 ---
 

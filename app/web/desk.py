@@ -1,5 +1,5 @@
 """
-app/web/desk.py – Operator desk router (Phase 3 / follow-up).
+app/web/desk.py – Operator desk router (Phases 3–4 / follow-up).
 
 Rows closed:
   23 – dashboard counts: received, classified, drafted, sent, held, failed
@@ -12,18 +12,20 @@ Mounted at /desk by app/main.py via app.include_router().
 
 Endpoints
 ---------
-GET  /desk/dashboard              Row 23 – message and draft counts by state
-GET  /desk/queue                  Inbound messages (all states), newest first
-GET  /desk/queue/{department}     Row 24 – messages filtered by stored department field
-GET  /desk/decisions              Decisions for the tenant, newest first
-GET  /desk/drafts                 Drafts for the tenant, newest first
-GET  /desk/approval               Pending approval queue entries
-POST /desk/approval/{id}/approve  Approve a pending entry (calls resolve())
-POST /desk/approval/{id}/reject   Reject a pending entry  (calls resolve())
-GET  /desk/audit                  Recent audit log entries (default limit 100)
-GET  /desk/tasks                  Active task list (mirrors /tasks, tenant-scoped)
-GET  /desk/quota                  Today's token quota and usage for the tenant
-GET  /desk/cost                   Cumulative cost summary from usage_events
+GET    /desk/dashboard              Row 23 – message and draft counts by state
+GET    /desk/queue                  Inbound messages (all states), newest first
+GET    /desk/queue/{department}     Row 24 – messages filtered by stored department field
+GET    /desk/decisions              Decisions for the tenant, newest first
+GET    /desk/drafts                 Drafts for the tenant, newest first
+GET    /desk/approval               Pending approval queue entries
+POST   /desk/approval/{id}/approve  Approve a pending entry (calls resolve())
+POST   /desk/approval/{id}/reject   Reject a pending entry  (calls resolve())
+GET    /desk/audit                  Recent audit log entries (default limit 100)
+GET    /desk/tasks                  Active task list (mirrors /tasks, tenant-scoped)
+GET    /desk/quota                  Today's token quota and usage for the tenant
+GET    /desk/cost                   Cumulative cost summary from usage_events
+GET    /desk/privacy/export         Phase 4 – full tenant data export (GDPR Art. 20)
+DELETE /desk/privacy/data           Phase 4 – right-to-erasure for the tenant
 
 All imports from app.main are deferred to function bodies to avoid the
 circular-import that would arise from app.main importing this module at
@@ -507,6 +509,66 @@ def desk_cost(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 – Privacy pack: export and erasure
+# ---------------------------------------------------------------------------
+
+@router.get("/privacy/export")
+def privacy_export(authorization: Optional[str] = Header(default=None)):
+    """
+    Export all personal data held for the authenticated tenant (GDPR Art. 20).
+
+    Returns the full tenant data as a JSON-serialisable dict.  The response
+    includes messages, drafts, audit log, usage events, and approval queue.
+    Raw message JSON (``raw_json``) is excluded by default to keep the
+    payload compact; it contains only envelope metadata, not body text.
+
+    This endpoint does not delete any data.  For erasure use DELETE
+    /desk/privacy/data.
+    """
+    from app.main import safe_db_error_message
+    from app.domain.export import export_tenant
+
+    db, user = _open_db_and_auth(authorization)
+    try:
+        data = export_tenant(db, user.tenant_id, include_raw_json=False)
+        return data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(exc))
+    finally:
+        db.close()
+
+
+@router.delete("/privacy/data")
+def privacy_erase(authorization: Optional[str] = Header(default=None)):
+    """
+    Right-to-erasure: delete all personal data for the authenticated tenant.
+
+    Deletes messages (unless legal_hold=True), drafts, approval queue,
+    audit log, usage events, work queue, and dead-letter rows for this
+    tenant.  The tenant record and user accounts are retained (account
+    deletion is a separate operator action).
+
+    Returns a summary of what was deleted and how many legal-hold rows
+    were skipped.
+    """
+    from app.main import safe_db_error_message
+    from app.domain.retention import delete_tenant_data
+
+    db, user = _open_db_and_auth(authorization)
+    try:
+        result = delete_tenant_data(db, user.tenant_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=safe_db_error_message(exc))
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # Task list (existing task list, re-exposed at desk path)
 # ---------------------------------------------------------------------------
 
@@ -541,6 +603,7 @@ def _ser_message(m) -> dict:
         "department": getattr(m, "department", None),
         "state": m.state,
         "attachment_state": m.attachment_state,
+        "legal_hold": getattr(m, "legal_hold", False),
         "ingest_time": m.ingest_time.isoformat() if m.ingest_time else None,
         "tenant_id": m.tenant_id,
     }

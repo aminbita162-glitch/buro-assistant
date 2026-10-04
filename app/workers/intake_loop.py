@@ -11,10 +11,16 @@ Provider selection
 - Otherwise the loop falls back to the injected *provider* argument (default:
   ``FakeProvider``).  Tests pass a ``FakeProvider`` instance directly.
 
-Secrets
--------
+Secrets / safe logging (Phase 4)
+---------------------------------
 All mailbox credentials are read from environment variables inside
 ``IMAPProvider``.  This module never reads, logs, or forwards any secret.
+
+A :class:`_SecretFilter` is installed on the module-level logger.  It scrubs
+the values of known secret environment variables (``IMAP_PASSWORD``,
+``IMAP_USER``) from every log record before it is emitted.  This guards
+against accidental future changes that might interpolate an env value into a
+log message.
 
 Usage (library, blocking)::
 
@@ -45,6 +51,36 @@ from app.pipeline import run_pipeline, PipelineResult
 from app.workers.dlq import send_to_dlq
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Safe-logging filter — strips secret env-var values from log records
+# ---------------------------------------------------------------------------
+
+_SECRET_ENV_KEYS = ("IMAP_PASSWORD", "IMAP_USER")
+
+
+class _SecretFilter(logging.Filter):
+    """
+    Removes the runtime values of secret environment variables from log
+    records.  Applied at module load time to the intake-loop logger so that
+    accidental interpolation of a secret value is scrubbed before emission.
+
+    Only active when the env var is set (i.e. a live mailbox is configured).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        for key in _SECRET_ENV_KEYS:
+            val = os.environ.get(key, "")
+            if val and val in msg:
+                # Replace the secret value with a placeholder in-place.
+                record.msg = str(record.msg).replace(val, f"[{key}]")
+                record.args = ()   # args already interpolated by getMessage()
+        return True
+
+
+logger.addFilter(_SecretFilter())
 
 
 # ---------------------------------------------------------------------------

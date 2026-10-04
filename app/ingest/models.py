@@ -10,7 +10,7 @@ Rows closed:
 from __future__ import annotations
 
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, UniqueConstraint, ForeignKey,
+    Boolean, Column, Integer, String, Text, DateTime, UniqueConstraint, ForeignKey,
 )
 from sqlalchemy.orm import declarative_base
 
@@ -47,6 +47,10 @@ class Message(Base):
     # Attachment state (row 12).
     attachment_state = Column(String, nullable=False, default="none")
     # attachment_state values: none | clean | quarantine
+
+    # Legal hold (Phase 4 / Section B item 12).
+    # When True, retention delete and right-to-erasure skip this row.
+    legal_hold = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         # Row 3 – idempotency key.
